@@ -1,0 +1,1435 @@
+import { useState, useEffect, useRef } from "react";
+
+/* ============================================================
+   PaceForge — AI running PB coach
+   Single-file React artifact. Plan generation runs live via
+   the Anthropic API (no key needed in this environment).
+   ============================================================ */
+
+const DISTANCES = [
+  { id: "1 Mile", label: "1 Mile", sub: "1.6 km · speed", hours: false },
+  { id: "5K", label: "5K", sub: "5 km · the classic", hours: false },
+  { id: "10K", label: "10K", sub: "10 km · speed + grit", hours: false },
+  { id: "Half Marathon", label: "Half", sub: "21.1 km · endurance", hours: true },
+  { id: "Marathon", label: "Marathon", sub: "42.2 km · the big one", hours: true },
+];
+
+const LOADING_LINES = [
+  "Reading your numbers…",
+  "Checking the math on your goal…",
+  "Building your training phases…",
+  "Programming the gym sessions…",
+  "Dialling in your paces…",
+  "Forging your plan…",
+];
+
+const FONTS_AND_CSS = `
+@import url('https://fonts.googleapis.com/css2?family=Anton&family=Manrope:wght@400;500;600;700;800&display=swap');
+
+.pf-root *{ box-sizing:border-box; margin:0; padding:0; }
+.pf-root{
+  --bg:#0a0b0a;
+  --surface:#131513;
+  --surface-2:#1b1e1b;
+  --volt:#d4ff3e;
+  --volt-soft:rgba(212,255,62,0.14);
+  --text:#f3f5ef;
+  --muted:#8b9183;
+  --line:rgba(255,255,255,0.09);
+  --warn:#ff6b45;
+  --good:#5fe39a;
+  font-family:'Manrope',-apple-system,sans-serif;
+  color:var(--text);
+  background:var(--bg);
+  min-height:100%;
+  position:relative;
+  overflow-x:hidden;
+  -webkit-font-smoothing:antialiased;
+}
+.pf-root::before{
+  content:""; position:fixed; inset:0; pointer-events:none; z-index:0;
+  background:
+    radial-gradient(900px 500px at 80% -10%, rgba(212,255,62,0.10), transparent 60%),
+    radial-gradient(700px 500px at -10% 110%, rgba(212,255,62,0.05), transparent 60%);
+}
+.pf-root::after{
+  content:""; position:fixed; inset:0; pointer-events:none; z-index:0; opacity:0.5;
+  background-image:linear-gradient(var(--line) 1px,transparent 1px),linear-gradient(90deg,var(--line) 1px,transparent 1px);
+  background-size:64px 64px;
+  -webkit-mask-image:radial-gradient(ellipse 80% 70% at 50% 30%,#000 0%,transparent 75%);
+          mask-image:radial-gradient(ellipse 80% 70% at 50% 30%,#000 0%,transparent 75%);
+}
+.pf-wrap{ position:relative; z-index:1; max-width:1040px; margin:0 auto; padding:28px 20px 90px; }
+
+.pf-display{ font-family:'Anton',sans-serif; text-transform:uppercase; letter-spacing:0.01em; line-height:0.92; }
+.pf-mono-num{ font-family:'Anton',sans-serif; letter-spacing:0.02em; }
+
+/* top bar */
+.pf-top{ display:flex; align-items:center; justify-content:space-between; margin-bottom:48px; }
+.pf-brand{ display:flex; align-items:center; gap:10px; font-weight:800; letter-spacing:0.18em; font-size:13px; text-transform:uppercase; }
+.pf-dot{ width:11px; height:11px; border-radius:50%; background:var(--volt); box-shadow:0 0 18px var(--volt); }
+.pf-step-tag{ font-size:11px; letter-spacing:0.18em; text-transform:uppercase; color:var(--muted); }
+
+/* hero */
+.pf-hero{ padding:60px 0 30px; }
+.pf-kicker{ display:inline-block; font-size:12px; letter-spacing:0.28em; text-transform:uppercase; color:var(--volt); border:1px solid var(--volt-soft); padding:7px 14px; border-radius:100px; margin-bottom:26px; }
+.pf-h1{ font-size:clamp(52px,11vw,128px); }
+.pf-h1 .out{ -webkit-text-stroke:1.5px var(--text); color:transparent; }
+.pf-h1 .vlt{ color:var(--volt); }
+.pf-sub{ max-width:520px; color:var(--muted); font-size:17px; line-height:1.55; margin:26px 0 38px; }
+
+.pf-cta{
+  font-family:'Anton',sans-serif; font-size:22px; letter-spacing:0.06em; text-transform:uppercase;
+  background:var(--volt); color:#0a0b0a; border:none; cursor:pointer;
+  padding:20px 42px; border-radius:14px; display:inline-flex; align-items:center; gap:14px;
+  transition:transform .18s ease, box-shadow .18s ease; box-shadow:0 0 0 rgba(212,255,62,0);
+}
+.pf-cta:hover{ transform:translateY(-3px); box-shadow:0 14px 40px rgba(212,255,62,0.28); }
+.pf-cta .arr{ transition:transform .18s ease; }
+.pf-cta:hover .arr{ transform:translateX(6px); }
+
+.pf-feat{ display:grid; grid-template-columns:repeat(3,1fr); gap:1px; margin-top:70px; border:1px solid var(--line); border-radius:16px; overflow:hidden; background:var(--line); }
+.pf-feat-cell{ background:var(--bg); padding:24px 22px; }
+.pf-feat-cell h4{ font-size:14px; letter-spacing:0.04em; margin-bottom:8px; }
+.pf-feat-cell p{ font-size:13.5px; color:var(--muted); line-height:1.5; }
+.pf-feat-num{ font-family:'Anton',sans-serif; color:var(--volt); font-size:13px; letter-spacing:0.1em; display:block; margin-bottom:14px; }
+
+/* wizard */
+.pf-card{ background:var(--surface); border:1px solid var(--line); border-radius:22px; padding:34px; }
+.pf-prog{ display:flex; gap:8px; margin-bottom:30px; }
+.pf-prog-seg{ flex:1; height:5px; border-radius:100px; background:var(--surface-2); overflow:hidden; }
+.pf-prog-fill{ height:100%; background:var(--volt); border-radius:100px; transition:width .4s ease; }
+.pf-step-title{ font-size:clamp(30px,6vw,46px); margin-bottom:6px; }
+.pf-step-desc{ color:var(--muted); margin-bottom:30px; font-size:15px; }
+
+.pf-field{ margin-bottom:22px; }
+.pf-label{ display:block; font-size:12px; letter-spacing:0.14em; text-transform:uppercase; color:var(--muted); margin-bottom:10px; }
+.pf-label-row{ display:flex; align-items:center; justify-content:space-between; margin-bottom:10px; }
+.pf-label-row .pf-label{ margin-bottom:0; }
+.pf-unit-mini{ padding:3px; }
+.pf-unit-mini button{ padding:5px 12px; font-size:12px; }
+.pf-input, .pf-select{
+  width:100%; background:var(--surface-2); border:1px solid var(--line); color:var(--text);
+  font-family:'Manrope',sans-serif; font-size:16px; font-weight:600; padding:15px 16px; border-radius:12px; outline:none;
+  transition:border-color .15s ease, box-shadow .15s ease;
+}
+.pf-input:focus, .pf-select:focus{ border-color:var(--volt); box-shadow:0 0 0 3px var(--volt-soft); }
+.pf-input::placeholder{ color:#565a52; font-weight:500; }
+.pf-row{ display:flex; gap:14px; }
+.pf-row > *{ flex:1; }
+
+.pf-toggle{ display:inline-flex; background:var(--surface-2); border:1px solid var(--line); border-radius:100px; padding:4px; gap:4px; }
+.pf-toggle button{ border:none; background:transparent; color:var(--muted); font-family:'Manrope'; font-weight:700; font-size:13px; padding:8px 18px; border-radius:100px; cursor:pointer; transition:all .15s; }
+.pf-toggle button.on{ background:var(--volt); color:#0a0b0a; }
+
+.pf-dist-grid{ display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); gap:12px; }
+.pf-dist{ text-align:left; background:var(--surface-2); border:1px solid var(--line); border-radius:16px; padding:20px 18px; cursor:pointer; transition:all .15s ease; position:relative; }
+.pf-dist:hover{ border-color:rgba(212,255,62,0.45); transform:translateY(-2px); }
+.pf-dist.sel{ border-color:var(--volt); background:linear-gradient(160deg,rgba(212,255,62,0.12),var(--surface-2)); }
+.pf-dist .nm{ font-family:'Anton'; font-size:30px; letter-spacing:0.02em; }
+.pf-dist .sb{ font-size:12px; color:var(--muted); margin-top:4px; }
+.pf-dist .chk{ position:absolute; top:14px; right:14px; width:20px; height:20px; border-radius:50%; border:1.5px solid var(--line); transition:all .15s; }
+.pf-dist.sel .chk{ background:var(--volt); border-color:var(--volt); }
+
+.pf-time{ display:flex; align-items:flex-end; gap:8px; }
+.pf-time .seg{ flex:1; }
+.pf-time .colon{ font-family:'Anton'; font-size:30px; color:var(--muted); padding-bottom:8px; }
+.pf-time .pf-input{ text-align:center; font-family:'Anton'; font-size:24px; letter-spacing:0.04em; padding:12px 6px; }
+.pf-time-cap{ font-size:10px; letter-spacing:0.16em; text-transform:uppercase; color:var(--muted); text-align:center; margin-top:6px; }
+
+.pf-nav{ display:flex; justify-content:space-between; gap:14px; margin-top:34px; }
+.pf-btn{ font-family:'Manrope'; font-weight:800; font-size:15px; letter-spacing:0.02em; padding:15px 26px; border-radius:12px; cursor:pointer; border:1px solid var(--line); background:transparent; color:var(--text); transition:all .15s; }
+.pf-btn:hover{ border-color:var(--muted); }
+.pf-btn.primary{ background:var(--volt); color:#0a0b0a; border-color:var(--volt); }
+.pf-btn.primary:hover{ transform:translateY(-2px); box-shadow:0 10px 30px rgba(212,255,62,0.25); }
+.pf-btn:disabled{ opacity:0.4; cursor:not-allowed; transform:none; box-shadow:none; }
+.pf-err{ color:var(--warn); font-size:13px; margin-top:14px; font-weight:600; }
+
+/* loading */
+.pf-loading{ text-align:center; padding:90px 20px; }
+.pf-track{ width:min(420px,90%); margin:0 auto 36px; }
+.pf-track-bar{ height:8px; background:var(--surface-2); border-radius:100px; overflow:hidden; border:1px solid var(--line); }
+.pf-track-fill{ height:100%; background:linear-gradient(90deg,var(--volt),#9bff8a); border-radius:100px; animation:pffill 2.2s ease-in-out infinite; }
+@keyframes pffill{ 0%{width:5%} 50%{width:85%} 100%{width:5%} }
+.pf-runner{ font-family:'Anton'; font-size:54px; color:var(--volt); animation:pfpulse 1.1s ease-in-out infinite; }
+@keyframes pfpulse{ 0%,100%{opacity:.4; letter-spacing:.05em} 50%{opacity:1; letter-spacing:.18em} }
+.pf-load-line{ color:var(--muted); margin-top:18px; font-size:15px; min-height:22px; }
+
+/* results */
+.pf-res-head{ margin-bottom:26px; }
+.pf-assess{ border-radius:22px; padding:30px; border:1px solid var(--line); position:relative; overflow:hidden; }
+.pf-assess.realistic{ background:linear-gradient(150deg,rgba(95,227,154,0.13),var(--surface)); }
+.pf-assess.ambitious{ background:linear-gradient(150deg,rgba(212,255,62,0.12),var(--surface)); }
+.pf-assess.unrealistic{ background:linear-gradient(150deg,rgba(255,107,69,0.12),var(--surface)); }
+.pf-verdict{ font-size:11px; letter-spacing:0.2em; text-transform:uppercase; font-weight:800; }
+.pf-verdict.realistic{ color:var(--good); }
+.pf-verdict.ambitious{ color:var(--volt); }
+.pf-verdict.unrealistic{ color:var(--warn); }
+.pf-goal-row{ display:flex; flex-wrap:wrap; gap:30px; align-items:flex-end; margin:18px 0; }
+.pf-goal-block .cap{ font-size:11px; letter-spacing:0.16em; text-transform:uppercase; color:var(--muted); margin-bottom:6px; }
+.pf-goal-block .val{ font-family:'Anton'; font-size:clamp(40px,9vw,68px); line-height:0.9; }
+.pf-goal-block .val.tgt{ color:var(--volt); }
+.pf-goal-arrow{ font-family:'Anton'; font-size:34px; color:var(--muted); padding-bottom:8px; }
+.pf-assess p{ color:var(--text); opacity:0.9; line-height:1.6; font-size:15px; max-width:680px; }
+
+.pf-grid-2{ display:grid; grid-template-columns:1fr 1fr; gap:16px; margin-top:16px; }
+.pf-panel{ background:var(--surface); border:1px solid var(--line); border-radius:18px; padding:24px; }
+.pf-panel h3{ font-family:'Anton'; font-size:20px; letter-spacing:0.04em; text-transform:uppercase; margin-bottom:4px; }
+.pf-panel .h-sub{ font-size:12px; color:var(--muted); margin-bottom:18px; }
+.pf-section-title{ font-family:'Anton'; font-size:26px; letter-spacing:0.04em; text-transform:uppercase; margin:34px 0 16px; display:flex; align-items:center; gap:12px; }
+.pf-section-title::before{ content:""; width:26px; height:3px; background:var(--volt); border-radius:2px; }
+
+.pf-stat-row{ display:flex; justify-content:space-between; padding:11px 0; border-bottom:1px solid var(--line); font-size:14px; }
+.pf-stat-row:last-child{ border-bottom:none; }
+.pf-stat-row .k{ color:var(--muted); }
+.pf-stat-row .v{ font-weight:700; }
+
+.pf-phase{ display:flex; gap:14px; padding:14px 0; border-bottom:1px solid var(--line); }
+.pf-phase:last-child{ border-bottom:none; }
+.pf-phase .wk{ font-family:'Anton'; color:var(--volt); font-size:14px; min-width:54px; padding-top:2px; }
+.pf-phase .nm{ font-weight:800; font-size:15px; }
+.pf-phase .fc{ color:var(--muted); font-size:13.5px; margin-top:2px; line-height:1.45; }
+
+.pf-week-grid{ display:grid; grid-template-columns:repeat(auto-fit,minmax(130px,1fr)); gap:10px; }
+.pf-day{ background:var(--surface); border:1px solid var(--line); border-radius:14px; padding:16px 14px; }
+.pf-day.rest{ opacity:0.6; }
+.pf-day .dn{ font-size:10px; letter-spacing:0.16em; text-transform:uppercase; color:var(--muted); margin-bottom:8px; }
+.pf-day .ss{ font-family:'Anton'; font-size:16px; letter-spacing:0.02em; margin-bottom:6px; }
+.pf-day .ss.run{ color:var(--volt); }
+.pf-day .ss.gym{ color:#7fb3ff; }
+.pf-day .dt{ font-size:12.5px; color:var(--muted); line-height:1.4; }
+
+.pf-pace{ display:flex; justify-content:space-between; align-items:center; padding:13px 16px; background:var(--surface); border:1px solid var(--line); border-radius:12px; margin-bottom:10px; }
+.pf-pace .pl{ font-weight:800; font-size:14px; }
+.pf-pace .pn{ font-size:12px; color:var(--muted); margin-top:2px; max-width:340px; line-height:1.4; }
+.pf-pace .pv{ font-family:'Anton'; font-size:22px; color:var(--volt); white-space:nowrap; padding-left:14px; }
+
+.pf-gym{ margin-bottom:16px; }
+.pf-gym-head{ display:flex; align-items:baseline; gap:10px; margin-bottom:12px; }
+.pf-gym-head .gd{ font-size:11px; letter-spacing:0.14em; text-transform:uppercase; color:#7fb3ff; font-weight:800; }
+.pf-gym-head .gn{ font-family:'Anton'; font-size:18px; letter-spacing:0.03em; }
+.pf-ex{ display:flex; justify-content:space-between; padding:9px 0; border-bottom:1px solid var(--line); font-size:14px; }
+.pf-ex:last-child{ border-bottom:none; }
+.pf-ex .en{ font-weight:600; }
+.pf-ex .es{ color:var(--volt); font-family:'Anton'; letter-spacing:0.04em; font-size:14px; }
+
+.pf-tip{ display:flex; gap:12px; padding:12px 0; font-size:14.5px; line-height:1.5; border-bottom:1px solid var(--line); }
+.pf-tip:last-child{ border-bottom:none; }
+.pf-tip .ti{ color:var(--volt); font-family:'Anton'; font-size:14px; }
+
+/* week-by-week */
+.pf-wbw-btn{ width:100%; }
+.pf-wk-item{ background:var(--surface); border:1px solid var(--line); border-radius:14px; margin-bottom:10px; overflow:hidden; }
+.pf-wk-bar{ display:flex; align-items:center; gap:16px; padding:16px 18px; cursor:pointer; }
+.pf-wk-bar .num{ font-family:'Anton'; font-size:26px; color:var(--volt); min-width:60px; }
+.pf-wk-bar .info{ flex:1; }
+.pf-wk-bar .ph{ font-size:10px; letter-spacing:0.14em; text-transform:uppercase; color:var(--muted); }
+.pf-wk-bar .sm{ font-size:14px; font-weight:600; margin-top:2px; }
+.pf-wk-bar .dist{ font-family:'Anton'; font-size:16px; color:var(--text); }
+.pf-wk-bar .car{ color:var(--muted); transition:transform .2s; }
+.pf-wk-item.open .car{ transform:rotate(90deg); }
+.pf-wk-body{ padding:0 18px 18px 90px; }
+.pf-hl{ font-size:13.5px; color:var(--muted); padding:5px 0; display:flex; gap:8px; }
+.pf-hl::before{ content:"›"; color:var(--volt); font-weight:800; }
+
+.pf-foot{ text-align:center; margin-top:50px; color:var(--muted); font-size:13px; }.pf-restart{ background:none; border:1px solid var(--line); color:var(--text); padding:13px 26px; border-radius:12px; font-family:'Manrope'; font-weight:700; cursor:pointer; transition:all .15s; }
+.pf-restart:hover{ border-color:var(--volt); color:var(--volt); }
+.pf-disclaimer{ font-size:12px; color:var(--muted); line-height:1.5; max-width:600px; margin:18px auto 0; opacity:0.7; }
+
+.pf-pace-head{ display:flex; align-items:center; justify-content:space-between; gap:12px; }
+.pf-pace-toggle{ margin-top:18px; }
+.pf-pace-toggle button{ padding:6px 14px; font-size:12px; }
+.pf-share-hint{ font-size:13px; color:var(--muted); line-height:1.5; margin:12px 0 4px; }
+.pf-share-grid{ display:grid; grid-template-columns:1fr 1fr; gap:14px; margin:18px 0 6px; }
+.pf-share-row{ display:flex; gap:10px; }
+.pf-share-row .pf-input{ flex:1; min-width:0; }
+.pf-share-row .pf-btn{ white-space:nowrap; }
+.pf-copy-btn{ width:100%; margin-top:12px; }
+.pf-share-note{ margin-top:14px; padding:12px 14px; background:var(--volt-soft); border:1px solid rgba(212,255,62,0.3); border-radius:10px; font-size:13px; color:var(--text); }
+@media(max-width:680px){ .pf-share-grid{ grid-template-columns:1fr; } }
+
+.pf-fade{ animation:pffade .5s ease both; }
+@keyframes pffade{ from{opacity:0; transform:translateY(12px)} to{opacity:1; transform:none} }
+
+@media(max-width:680px){
+  .pf-feat{ grid-template-columns:1fr; }
+  .pf-grid-2{ grid-template-columns:1fr; }
+  .pf-card{ padding:24px 20px; }
+  .pf-wk-body{ padding-left:24px; }
+}
+`;
+
+/* ---------- helpers ---------- */
+function pad(n) {
+  return String(n).padStart(2, "0");
+}
+function buildTime(h, m, s, showHours) {
+  const hh = parseInt(h || 0, 10);
+  const mm = parseInt(m || 0, 10);
+  const ss = parseInt(s || 0, 10);
+  if (showHours) return `${hh}:${pad(mm)}:${pad(ss)}`;
+  return `${mm}:${pad(ss)}`;
+}
+function extractText(data) {
+  if (!data || !Array.isArray(data.content)) return "";
+  return data.content
+    .filter((b) => b.type === "text")
+    .map((b) => b.text)
+    .join("\n");
+}
+function parseJSONLoose(text, type = "object") {
+  let t = (text || "").replace(/```json/gi, "").replace(/```/g, "").trim();
+  const open = type === "array" ? "[" : "{";
+  const close = type === "array" ? "]" : "}";
+  const start = t.indexOf(open);
+  const end = t.lastIndexOf(close);
+  if (start !== -1 && end !== -1) t = t.slice(start, end + 1);
+  // strip trailing commas before } or ] which break JSON.parse
+  t = t.replace(/,\s*([}\]])/g, "$1");
+  return JSON.parse(t);
+}
+
+async function rawCall(prompt, signal) {
+  const res = await fetch("https://api.anthropic.com/v1/messages", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    signal,
+    body: JSON.stringify({
+      model: "claude-sonnet-4-20250514",
+      max_tokens: 1000,
+      messages: [{ role: "user", content: prompt }],
+    }),
+  });
+  if (!res.ok) {
+    let detail = "";
+    try { detail = (await res.text()).slice(0, 140); } catch (e) {}
+    throw new Error(`API error ${res.status}${detail ? " — " + detail : ""}`);
+  }
+  const data = await res.json();
+  const text = extractText(data);
+  if (!text) throw new Error("Empty response from the model.");
+  return text;
+}
+
+// Call Claude, parse JSON, and retry a couple of times on transient failures.
+async function callForJSON(prompt, type = "object", attempts = 3) {
+  let lastErr;
+  for (let i = 0; i < attempts; i++) {
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), 45000);
+    try {
+      const text = await rawCall(prompt, ctrl.signal);
+      clearTimeout(timer);
+      return parseJSONLoose(text, type);
+    } catch (e) {
+      clearTimeout(timer);
+      lastErr = e;
+      if (e.name === "AbortError") lastErr = new Error("The request timed out. Please try again.");
+      // brief backoff before retrying
+      if (i < attempts - 1) await new Promise((r) => setTimeout(r, 600));
+    }
+  }
+  throw lastErr || new Error("Could not generate a plan.");
+}
+
+// Try the AI once, fail fast, return null on any problem (we fall back locally).
+async function tryAI(prompt, type = "object") {
+  try {
+    const ctrl = new AbortController();
+    const t = setTimeout(() => ctrl.abort(), 18000);
+    const text = await rawCall(prompt, ctrl.signal);
+    clearTimeout(t);
+    return parseJSONLoose(text, type);
+  } catch (e) {
+    return null;
+  }
+}
+
+/* ============================================================
+   LOCAL COACHING ENGINE — works with zero network.
+   Riegel race prediction + VDOT-style pace zones + periodisation.
+   ============================================================ */
+const DIST_KM = { "1 Mile": 1.60934, "5K": 5, "10K": 10, "Half Marathon": 21.0975, "Marathon": 42.195 };
+
+function clamp(n, lo, hi) { return Math.max(lo, Math.min(hi, n)); }
+function fmtClock(sec) {
+  sec = Math.max(0, Math.round(sec));
+  const h = Math.floor(sec / 3600), m = Math.floor((sec % 3600) / 60), s = sec % 60;
+  return h > 0 ? `${h}:${pad(m)}:${pad(s)}` : `${m}:${pad(s)}`;
+}
+function fmtPace(secPerKm, imperial) {
+  let v = imperial ? secPerKm * 1.60934 : secPerKm;
+  v = Math.round(v);
+  return `${Math.floor(v / 60)}:${pad(v % 60)}/${imperial ? "mi" : "km"}`;
+}
+// Format a stored sec/km pace into the chosen display unit ('km' | 'mi').
+function fmtPaceVal(secPerKm, unit) {
+  if (!isFinite(secPerKm) || secPerKm <= 0) return "—";
+  let v = unit === "mi" ? secPerKm * 1.60934 : secPerKm;
+  v = Math.round(v);
+  return `${Math.floor(v / 60)}:${pad(v % 60)}/${unit}`;
+}
+// Parse a pace string like "5:30/km" or "8:50/mi" back to sec/km (for AI results).
+function parsePaceToSecPerKm(str) {
+  if (typeof str !== "string") return NaN;
+  const m = str.match(/(\d+):(\d{1,2})/);
+  if (!m) return NaN;
+  let sec = parseInt(m[1], 10) * 60 + parseInt(m[2], 10);
+  if (/mi/i.test(str)) sec = sec / 1.60934;
+  return sec;
+}
+function timeToSec(h, m, s) {
+  return (parseInt(h || 0, 10)) * 3600 + (parseInt(m || 0, 10)) * 60 + (parseInt(s || 0, 10));
+}
+
+function buildLocalPlan(f, units) {
+  const imperial = units === "imperial";
+  const ud = imperial ? "mi" : "km";
+  const toUd = (km) => Math.round(km * (imperial ? 0.621371 : 1));
+  const distKm = DIST_KM[f.distance] || 5;
+  const showHrs = distKm >= 21;
+  const curSec = timeToSec(f.curH, f.curM, f.curS);
+  const goalSec = timeToSec(f.goalH, f.goalM, f.goalS);
+  const exp = f.experience || "Intermediate";
+  const days = parseInt(f.days, 10) || 4;
+
+  const expCap = { Beginner: 0.12, Intermediate: 0.08, Advanced: 0.05 }[exp];
+  const rate = { Beginner: 0.009, Intermediate: 0.006, Advanced: 0.0035 }[exp];
+  const userWeeks = f.weeksAvail ? clamp(parseInt(f.weeksAvail, 10), 4, 24) : null;
+
+  const want = curSec > 0 ? (curSec - goalSec) / curSec : 0; // fraction faster
+  let feasibility, realisticSec, recommendedWeeks;
+
+  if (goalSec <= 0 || curSec <= 0 || goalSec >= curSec) {
+    feasibility = "realistic";
+    realisticSec = goalSec > 0 ? goalSec : Math.round(curSec * 0.97);
+    recommendedWeeks = userWeeks || 10;
+  } else if (userWeeks) {
+    const maxImp = Math.min(expCap, rate * userWeeks);
+    recommendedWeeks = userWeeks;
+    if (want <= maxImp * 0.6) { feasibility = "realistic"; realisticSec = goalSec; }
+    else if (want <= maxImp) { feasibility = "ambitious"; realisticSec = goalSec; }
+    else { feasibility = "unrealistic"; realisticSec = Math.round(curSec * (1 - maxImp)); }
+  } else {
+    if (want > expCap) {
+      feasibility = "unrealistic";
+      realisticSec = Math.round(curSec * (1 - expCap));
+      recommendedWeeks = clamp(Math.ceil(expCap / rate), 12, 24);
+    } else {
+      recommendedWeeks = clamp(Math.ceil(want / rate), 8, 24);
+      feasibility = want <= expCap * 0.5 ? "realistic" : "ambitious";
+      realisticSec = goalSec;
+    }
+  }
+
+  const W = recommendedWeeks;
+  const pctReal = Math.round(((curSec - realisticSec) / curSec) * 1000) / 10;
+  const pctWant = Math.round(want * 1000) / 10;
+  const currentLevel = exp + " runner";
+
+  let summary;
+  if (feasibility === "realistic")
+    summary = `Going from ${fmtClock(curSec)} to ${fmtClock(realisticSec)} is about a ${pctReal}% improvement — comfortably within reach over ${W} weeks of consistent training. Stay patient and trust the easy days.`;
+  else if (feasibility === "ambitious")
+    summary = `Your target is roughly a ${pctReal}% improvement in ${W} weeks. It's aggressive but achievable if you hit the key sessions and protect your recovery — sleep and consistency will decide it.`;
+  else
+    summary = `Dropping from ${fmtClock(curSec)} to ${fmtClock(goalSec)} (${pctWant}%) is more than is realistic in this block. We've set a strong, achievable target of ${fmtClock(realisticSec)} (${pctReal}%) instead — nail that, then chase the next PB.`;
+
+  // ---- pace zones from current fitness (Riegel -> 5K equivalent) ----
+  const t5k = curSec * Math.pow(5 / distKm, 1.06);
+  const p5k = t5k / 5; // sec/km at current 5K fitness
+  const paces = [
+    { label: "Easy", secPerKm: p5k * 1.30, note: "Conversational — the bulk of your week" },
+    { label: "Long Run", secPerKm: p5k * 1.33, note: "Steady aerobic endurance" },
+    { label: "Tempo / Threshold", secPerKm: p5k * 1.06, note: "Comfortably hard, ~1-hour effort" },
+    { label: "Intervals", secPerKm: p5k * 0.97, note: "VO₂max reps with full recovery" },
+    { label: "Goal Race Pace", secPerKm: realisticSec / distKm, note: "Goal-pace race rehearsals" },
+  ];
+
+  // ---- weekly volume ----
+  const basePeak = { "1 Mile": 40, "5K": 48, "10K": 64, "Half Marathon": 80, "Marathon": 95 }[f.distance] || 50;
+  const expF = { Beginner: 0.62, Intermediate: 0.85, Advanced: 1.05 }[exp];
+  const peakKm = Math.round(basePeak * expF * clamp(days / 5, 0.6, 1.4));
+  const startKm = Math.round(peakKm * 0.6);
+  const longKm = Math.max(8, Math.round(peakKm * 0.3));
+
+  // ---- pace-aware detail strings ----
+  const dEasy = `40–50 min easy @ ${fmtPace(p5k * 1.30, imperial)}`;
+  const dEasyGym = `35 min easy + strength`;
+  const dTempo = `15–25 min tempo @ ${fmtPace(p5k * 1.06, imperial)}`;
+  const dLong = `${toUd(longKm)} ${ud} @ ${fmtPace(p5k * 1.33, imperial)}`;
+  const dInt = (() => {
+    if (f.distance === "1 Mile") return `8 × 400 m @ ${fmtPace(p5k * 0.95, imperial)}`;
+    if (f.distance === "Half Marathon" || f.distance === "Marathon") return `5 × 1 km @ ${fmtPace(p5k * 1.06, imperial)}`;
+    return `6 × 800 m @ ${fmtPace(p5k * 0.97, imperial)}`;
+  })();
+  const REST = { day: "", type: "Rest", detail: "Rest / mobility" };
+
+  const D = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
+  const T = {
+    3: ["Strength", "Intervals", "Rest", "Tempo", "Rest", "Strength", "Long"],
+    4: ["Strength", "Intervals", "Easy", "Tempo", "Rest", "Strength", "Long"],
+    5: ["Strength", "Intervals", "Easy", "Tempo", "Easy", "Strength", "Long"],
+    6: ["EasyGym", "Intervals", "Easy", "Tempo", "Strength", "Easy", "Long"],
+    7: ["EasyGym", "Intervals", "Easy", "Tempo", "Easy", "EasyGym", "Long"],
+  }[clamp(days, 3, 7)];
+
+  const map = {
+    Strength: { type: "Strength", detail: "Gym session (see Gym Work below)" },
+    Intervals: { type: "Intervals", detail: dInt },
+    Tempo: { type: "Tempo", detail: dTempo },
+    Easy: { type: "Easy Run", detail: dEasy },
+    EasyGym: { type: "Easy Run", detail: dEasyGym },
+    Long: { type: "Long Run", detail: dLong },
+    Rest: { type: "Rest", detail: "Rest / mobility" },
+  };
+  const weeklyStructure = T.map((code, i) => ({ day: D[i], type: map[code].type, detail: map[code].detail }));
+
+  // ---- phases ----
+  const taper = f.distance === "Marathon" ? (W >= 14 ? 3 : 2) : (W >= 12 ? 2 : 1);
+  const core = Math.max(3, W - taper);
+  let base = Math.max(1, Math.round(core * 0.4));
+  let build = Math.max(1, Math.round(core * 0.35));
+  let peak = Math.max(1, core - base - build);
+  const phases = [
+    { weeks: `1–${base}`, name: "Base", focus: "Build the aerobic engine with easy volume; introduce strength." },
+    { weeks: `${base + 1}–${base + build}`, name: "Build", focus: "Add threshold/tempo work and extend the long run." },
+    { weeks: `${base + build + 1}–${core}`, name: "Peak", focus: "Sharpen with VO₂max intervals and goal-pace efforts." },
+    { weeks: `${core + 1}–${W}`, name: "Taper", focus: "Cut volume, keep a little intensity, arrive fresh and fast." },
+  ];
+
+  // ---- strength ----
+  const strength = [
+    { day: "Session A", name: "Lower Body & Power", exercises: [
+      { name: "Back Squat", sets: "4 × 5" },
+      { name: "Romanian Deadlift", sets: "3 × 8" },
+      { name: "Walking Lunges", sets: "3 × 10 / leg" },
+      { name: "Calf Raises", sets: "3 × 15" },
+      { name: "Plank", sets: "3 × 45 s" },
+    ]},
+    { day: "Session B", name: "Power & Core", exercises: [
+      { name: "Trap-Bar Deadlift", sets: "4 × 6" },
+      { name: "Bulgarian Split Squat", sets: "3 × 8 / leg" },
+      { name: "Box Jumps", sets: "4 × 5" },
+      { name: "Single-Leg Calf Raise", sets: "3 × 12 / leg" },
+      { name: "Hanging Leg Raise", sets: "3 × 12" },
+    ]},
+  ];
+
+  // ---- tips ----
+  const distTip = {
+    "1 Mile": "Finish key sessions with 4–6 × 100 m strides to build leg speed.",
+    "5K": "Sprinkle in strides twice a week to sharpen turnover for race day.",
+    "10K": "Practice running goal pace in your tempo sessions so it feels familiar.",
+    "Half Marathon": "Rehearse fuelling and hydration on your longer long runs.",
+    "Marathon": "Train your gut: practice race-day fuelling on every long run.",
+  }[f.distance];
+  const tips = [
+    "Keep ~80% of your weekly running truly easy — if you can't hold a conversation, slow down.",
+    "Increase weekly volume by no more than ~10% and take a cutback week every 4th week.",
+    "Strength work twice a week is non-negotiable for staying injury-free and running economically.",
+    "Fitness is built during recovery — prioritise sleep and protein on hard days.",
+    distTip,
+  ];
+
+  return {
+    assessment: { feasibility, realisticGoalTime: fmtClock(realisticSec), recommendedWeeks: W, currentLevel, summary },
+    mileage: { startWeekly: `${toUd(startKm)} ${ud}`, peakWeekly: `${toUd(peakKm)} ${ud}` },
+    phases, weeklyStructure, paces, strength, tips,
+    _meta: { peakKm, startKm, longKm, taper, core, ud, imperial, p5k },
+  };
+}
+
+function buildLocalWeeks(plan, f, units) {
+  const m = plan._meta || {};
+  const imperial = units === "imperial";
+  const ud = imperial ? "mi" : "km";
+  const toUd = (km) => Math.round(km * (imperial ? 0.621371 : 1));
+  const W = plan.assessment?.recommendedWeeks || 12;
+  const taper = m.taper || 2;
+  const core = W - taper;
+  const start = m.startKm || 25, peak = m.peakKm || 50, p5k = m.p5k || 330;
+  const phaseFor = (wk) => {
+    for (const p of plan.phases) {
+      const [a, b] = p.weeks.replace(/–/g, "-").split("-").map((x) => parseInt(x, 10));
+      if (wk >= a && wk <= b) return p.name;
+    }
+    return "Build";
+  };
+  const out = [];
+  for (let wk = 1; wk <= W; wk++) {
+    let vol;
+    if (wk <= core) {
+      const frac = core > 1 ? (wk - 1) / (core - 1) : 1;
+      vol = start + (peak - start) * frac;
+      if (wk % 4 === 0) vol *= 0.82; // cutback week
+    } else {
+      const tIdx = wk - core; // 1..taper
+      vol = peak * (0.7 - 0.18 * (tIdx - 1));
+    }
+    vol = Math.max(start * 0.5, Math.round(vol));
+    const longWk = Math.max(6, Math.round(vol * 0.32));
+    const phase = phaseFor(wk);
+    const cut = wk <= core && wk % 4 === 0;
+    const quality = (wk % 2 === 0)
+      ? `Intervals: ${f.distance === "1 Mile" ? "8 × 400 m" : "6 × 800 m"} @ ${fmtPace(p5k * 0.97, imperial)}`
+      : `Tempo: ${15 + Math.min(15, wk)} min @ ${fmtPace(p5k * 1.06, imperial)}`;
+    const summary = wk > core ? "Taper — sharpen and recover for race day"
+      : cut ? "Recovery week — absorb the training"
+      : phase === "Base" ? "Aerobic base building"
+      : phase === "Build" ? "Threshold focus, longer long run"
+      : "Race-specific sharpening";
+    out.push({
+      week: wk, phase, totalDistance: `${toUd(vol)} ${ud}`, summary,
+      highlights: [
+        `Long run: ${toUd(longWk)} ${ud} easy`,
+        quality,
+        wk === W ? "1 strength session (light)" : "2 strength sessions",
+      ],
+    });
+  }
+  return out;
+}
+
+const shapeOK = (p) => p && p.assessment && Array.isArray(p.weeklyStructure) && p.weeklyStructure.length > 0;
+
+// Ensure every pace has a numeric secPerKm (AI results arrive as strings).
+function normalizePlan(p) {
+  if (!p || !Array.isArray(p.paces)) return p;
+  p.paces = p.paces.map((pc) => {
+    if (typeof pc.secPerKm === "number" && isFinite(pc.secPerKm)) return pc;
+    return { ...pc, secPerKm: parsePaceToSecPerKm(pc.pace) };
+  });
+  return p;
+}
+
+/* ============================================================
+   EXPORT — printable PDF (via browser print), email & SMS text
+   ============================================================ */
+function esc(s) {
+  return String(s == null ? "" : s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+}
+
+function buildPlanHTML(plan, ctx) {
+  const a = plan.assessment || {};
+  const u = ctx.paceUnit;
+  const verdict = { realistic: "Realistic Goal", ambitious: "Ambitious — But Doable", unrealistic: "Goal Adjusted" }[a.feasibility] || "Your Goal";
+  const paceRows = (plan.paces || []).map((p) =>
+    `<tr><td><b>${esc(p.label)}</b><div class="mut">${esc(p.note)}</div></td><td class="pace">${esc(fmtPaceVal(p.secPerKm, u))}</td></tr>`).join("");
+  const weekCols = (plan.weeklyStructure || []).map((d) =>
+    `<div class="day"><div class="dn">${esc(d.day)}</div><div class="dt2">${esc(d.type)}</div><div class="mut">${esc(d.detail)}</div></div>`).join("");
+  const phaseRows = (plan.phases || []).map((p) =>
+    `<tr><td class="wk">${esc(p.weeks)}</td><td><b>${esc(p.name)}</b><div class="mut">${esc(p.focus)}</div></td></tr>`).join("");
+  const gym = (plan.strength || []).map((g) =>
+    `<div class="gym"><div class="gh">${esc(g.day)} · ${esc(g.name)}</div>` +
+    (g.exercises || []).map((e) => `<div class="ex"><span>${esc(e.name)}</span><b>${esc(e.sets)}</b></div>`).join("") + `</div>`).join("");
+  const tips = (plan.tips || []).map((t) => `<li>${esc(t)}</li>`).join("");
+  const weeks = (ctx.weeks || []).map((w) =>
+    `<tr><td class="wk">W${esc(w.week)}</td><td><b>${esc(w.totalDistance)}</b> · ${esc(w.phase)}<div class="mut">${esc(w.summary)} — ${esc((w.highlights || []).join(" · "))}</div></td></tr>`).join("");
+
+  return `<!doctype html><html><head><meta charset="utf-8"><title>PaceForge — ${esc(ctx.distance)} Plan</title>
+<style>
+@page{margin:18mm}
+*{box-sizing:border-box}
+body{font-family:-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;color:#15171a;margin:0;line-height:1.45}
+h1{font-size:30px;margin:0 0 2px;letter-spacing:-.5px}
+.brand{color:#3a8a00;font-weight:800;letter-spacing:.16em;text-transform:uppercase;font-size:12px}
+.verdict{display:inline-block;background:#eef9d6;color:#3a6e00;font-weight:700;font-size:12px;padding:5px 12px;border-radius:20px;margin:14px 0}
+.goal{display:flex;gap:34px;margin:8px 0 4px;flex-wrap:wrap}
+.goal .b .c{font-size:11px;letter-spacing:.1em;text-transform:uppercase;color:#7a8088}
+.goal .b .v{font-size:30px;font-weight:800}
+.goal .b .v.t{color:#3a8a00}
+.sec{font-size:16px;font-weight:800;text-transform:uppercase;letter-spacing:.06em;margin:22px 0 8px;border-bottom:2px solid #15171a;padding-bottom:4px}
+table{width:100%;border-collapse:collapse}
+td{padding:7px 6px;border-bottom:1px solid #e6e8ea;vertical-align:top;font-size:13px}
+.mut{color:#7a8088;font-size:12px}
+.pace{text-align:right;font-weight:800;color:#3a8a00;white-space:nowrap;font-size:15px}
+.wk{font-weight:800;color:#3a8a00;white-space:nowrap;width:64px}
+.week{display:flex;flex-wrap:wrap;gap:8px}
+.day{flex:1;min-width:90px;border:1px solid #e6e8ea;border-radius:8px;padding:8px}
+.dn{font-size:10px;letter-spacing:.08em;text-transform:uppercase;color:#7a8088}
+.dt2{font-weight:800;font-size:13px;margin:2px 0}
+.gym{margin-bottom:10px}
+.gh{font-weight:800;font-size:13px;margin-bottom:4px}
+.ex{display:flex;justify-content:space-between;font-size:13px;padding:3px 0;border-bottom:1px solid #eee}
+ul{margin:6px 0;padding-left:18px}li{font-size:13px;margin:4px 0}
+.foot{margin-top:24px;color:#9aa0a6;font-size:11px;border-top:1px solid #e6e8ea;padding-top:8px}
+</style></head><body>
+<div class="brand">● PaceForge</div>
+<h1>Your ${esc(ctx.distance)} Training Plan</h1>
+<div class="verdict">${esc(verdict)}</div>
+<div class="goal">
+  <div class="b"><div class="c">Current PB</div><div class="v">${esc(ctx.currentPB)}</div></div>
+  <div class="b"><div class="c">Realistic Target</div><div class="v t">${esc(a.realisticGoalTime || "")}</div></div>
+  <div class="b"><div class="c">Plan Length</div><div class="v">${esc(a.recommendedWeeks || "")} wks</div></div>
+  <div class="b"><div class="c">Weekly Volume</div><div class="v">${esc((plan.mileage || {}).startWeekly)}→${esc((plan.mileage || {}).peakWeekly)}</div></div>
+</div>
+<p class="mut" style="max-width:640px">${esc(a.summary)}</p>
+<div class="sec">Training Phases</div><table>${phaseRows}</table>
+<div class="sec">Typical Training Week</div><div class="week">${weekCols}</div>
+<div class="sec">Your Paces (${esc(u === "mi" ? "per mile" : "per km")})</div><table>${paceRows}</table>
+<div class="sec">Gym Work</div>${gym}
+<div class="sec">Coach's Notes</div><ul>${tips}</ul>
+${weeks ? `<div class="sec">Week-By-Week Schedule</div><table>${weeks}</table>` : ""}
+<div class="foot">Generated by PaceForge. AI-assisted training guidance for healthy adults — build up gradually and consult a doctor before starting a new programme.</div>
+</body></html>`;
+}
+
+function buildPlanText(plan, ctx) {
+  const a = plan.assessment || {};
+  const u = ctx.paceUnit;
+  const L = [];
+  L.push(`MY ${ctx.distance.toUpperCase()} TRAINING PLAN — PaceForge`);
+  L.push(`Current PB: ${ctx.currentPB}  →  Target: ${a.realisticGoalTime}  (${a.recommendedWeeks} weeks)`);
+  if (a.summary) L.push("", a.summary);
+  L.push("", "PACES:");
+  (plan.paces || []).forEach((p) => L.push(`• ${p.label}: ${fmtPaceVal(p.secPerKm, u)}`));
+  L.push("", "TYPICAL WEEK:");
+  (plan.weeklyStructure || []).forEach((d) => L.push(`• ${d.day}: ${d.type} — ${d.detail}`));
+  L.push("", "GYM:");
+  (plan.strength || []).forEach((g) => L.push(`• ${g.day} (${g.name}): ` + (g.exercises || []).map((e) => `${e.name} ${e.sets}`).join(", ")));
+  L.push("", "Tip: use 'Save as PDF' in the app for the full printable plan with the week-by-week schedule.");
+  return L.join("\n");
+}
+
+function buildPlanSMS(plan, ctx) {
+  const a = plan.assessment || {};
+  const u = ctx.paceUnit;
+  const pk = (plan.paces || []).find((p) => p.label === "Goal Race Pace");
+  const ez = (plan.paces || []).find((p) => p.label === "Easy");
+  return `PaceForge ${ctx.distance} plan: ${ctx.currentPB} -> ${a.realisticGoalTime} over ${a.recommendedWeeks} wks. ` +
+    (ez ? `Easy ${fmtPaceVal(ez.secPerKm, u)}, ` : "") + (pk ? `race ${fmtPaceVal(pk.secPerKm, u)}. ` : "") +
+    `Open the app & Save as PDF for the full schedule.`;
+}
+
+function openPrintWindow(html) {
+  const w = window.open("", "_blank");
+  if (!w) return false;
+  w.document.open();
+  w.document.write(html);
+  w.document.close();
+  w.focus();
+  setTimeout(() => { try { w.print(); } catch (e) {} }, 450);
+  return true;
+}
+function openHref(url) {
+  // works in more sandboxes than setting location directly
+  const a = document.createElement("a");
+  a.href = url; a.target = "_blank"; a.rel = "noopener";
+  document.body.appendChild(a); a.click(); document.body.removeChild(a);
+}
+
+/* Set this to your deployed email endpoint to send for real, e.g.
+   const EMAIL_API = "https://your-app.vercel.app/api/send-email";
+   Leave it as "" and the Email button just opens the user's mail app. */
+const EMAIL_API = "";
+
+// Render the plan HTML to a real PDF and return base64 (needs html2pdf.js
+// loaded on the page — available on your deployed site, not in the sandbox).
+async function planToPdfBase64(htmlDocString) {
+  const h2p = (typeof window !== "undefined") && (window.html2pdf || null);
+  if (!h2p) throw new Error("html2pdf not loaded");
+  const doc = new DOMParser().parseFromString(htmlDocString, "text/html");
+  const el = document.createElement("div");
+  doc.querySelectorAll("style").forEach((s) => el.appendChild(s.cloneNode(true)));
+  while (doc.body.firstChild) el.appendChild(doc.body.firstChild);
+  Object.assign(el.style, { width: "800px", position: "fixed", left: "-9999px", background: "#fff" });
+  document.body.appendChild(el);
+  try {
+    const blob = await h2p().from(el).set({
+      margin: 8,
+      jsPDF: { unit: "mm", format: "a4", orientation: "portrait" },
+      html2canvas: { scale: 2, useCORS: true },
+      pagebreak: { mode: ["css", "legacy"] },
+    }).outputPdf("blob");
+    return await new Promise((res, rej) => {
+      const fr = new FileReader();
+      fr.onload = () => res(String(fr.result).split(",")[1]);
+      fr.onerror = rej;
+      fr.readAsDataURL(blob);
+    });
+  } finally {
+    document.body.removeChild(el);
+  }
+}
+
+/* ---------- main component ---------- */
+export default function App() {
+  const [step, setStep] = useState("landing"); // landing | form | loading | results
+  const [wizard, setWizard] = useState(0);
+  const [heightUnit, setHeightUnit] = useState("cm"); // cm | ft
+  const [weightUnit, setWeightUnit] = useState("kg"); // kg | lb
+  const [paceUnit, setPaceUnit] = useState("km"); // km | mi — independent toggle on results
+  const [err, setErr] = useState("");
+  const [plan, setPlan] = useState(null);
+  const [loadLine, setLoadLine] = useState(0);
+
+  // week-by-week
+  const [weeks, setWeeks] = useState(null);
+  const [weeksLoading, setWeeksLoading] = useState(false);
+  const [openWeek, setOpenWeek] = useState(null);
+
+  const [f, setF] = useState({
+    heightCm: "", weightKg: "", heightFt: "", heightIn: "", weightLb: "",
+    distance: "",
+    curH: "", curM: "", curS: "",
+    goalH: "", goalM: "", goalS: "",
+    days: "4", experience: "Intermediate", weeksAvail: "",
+  });
+  const set = (k, v) => setF((p) => ({ ...p, [k]: v }));
+
+  useEffect(() => {
+    if (step !== "loading") return;
+    const id = setInterval(() => setLoadLine((i) => (i + 1) % LOADING_LINES.length), 1400);
+    return () => clearInterval(id);
+  }, [step]);
+
+  const distObj = DISTANCES.find((d) => d.id === f.distance);
+  const showHours = distObj ? distObj.hours : false;
+  // Plan distances/paces lean imperial if either body-stat unit is imperial.
+  const displayUnit = (heightUnit === "ft" || weightUnit === "lb") ? "imperial" : "metric";
+
+  function validateStep() {
+    setErr("");
+    if (wizard === 0) {
+      const heightOK = heightUnit === "cm" ? !!f.heightCm : !!f.heightFt;
+      const weightOK = weightUnit === "kg" ? !!f.weightKg : !!f.weightLb;
+      if (!heightOK || !weightOK) { setErr("Enter your height and weight."); return false; }
+    }
+    if (wizard === 1 && !f.distance) { setErr("Pick the distance you want to PB."); return false; }
+    if (wizard === 2) {
+      if (!f.curM && !f.curH) { setErr("Enter your current personal best."); return false; }
+      if (!f.goalM && !f.goalH) { setErr("Enter your goal time."); return false; }
+    }
+    return true;
+  }
+
+  function next() {
+    if (!validateStep()) return;
+    if (wizard < 2) setWizard(wizard + 1);
+    else generate();
+  }
+  function back() {
+    setErr("");
+    if (wizard === 0) { setStep("landing"); return; }
+    setWizard(wizard - 1);
+  }
+
+  function describeAthlete() {
+    const height = heightUnit === "cm" ? `${f.heightCm} cm` : `${f.heightFt} ft ${f.heightIn || 0} in`;
+    const weight = weightUnit === "kg" ? `${f.weightKg} kg` : `${f.weightLb} lbs`;
+    const cur = buildTime(f.curH, f.curM, f.curS, showHours);
+    const goal = buildTime(f.goalH, f.goalM, f.goalS, showHours);
+    const timeframe = f.weeksAvail ? `${f.weeksAvail} weeks` : "flexible (you recommend a realistic length)";
+    return { height, weight, cur, goal, timeframe };
+  }
+
+  async function generate() {
+    setErr("");
+    setStep("loading");
+    setLoadLine(0);
+    setWeeks(null);
+    const a = describeAthlete();
+    const prompt = `You are an elite running and strength coach. Build a personalized, realistic training plan.
+
+ATHLETE
+- Height: ${a.height}
+- Weight: ${a.weight}
+- Experience: ${f.experience}
+- Days available to train per week: ${f.days}
+- Target event: ${f.distance}
+- Current personal best: ${a.cur}
+- Goal time: ${a.goal}
+- Timeframe: ${a.timeframe}
+
+TASK
+1. Honestly assess whether the goal time is achievable in the timeframe given the athlete's current PB and experience. If the timeframe is flexible, recommend a realistic number of weeks. If the goal is too aggressive, state a realistic goal time instead and explain briefly.
+2. Build a complete plan: training phases, a representative weekly structure (one entry for each of the 7 days, using the athlete's available days for hard sessions and the rest for easy runs / rest), 2 gym/strength sessions with specific exercises, training pace guidance, and key tips.
+
+Respond with ONLY valid JSON. No markdown, no backticks, no preamble. Keep every text value concise. Use this exact schema:
+{
+ "assessment": { "feasibility": "realistic" | "ambitious" | "unrealistic", "realisticGoalTime": "the time you'd actually target, formatted like the inputs", "recommendedWeeks": number, "currentLevel": "short label", "summary": "2-3 sentence honest assessment" },
+ "mileage": { "startWeekly": "e.g. 25 km", "peakWeekly": "e.g. 50 km" },
+ "phases": [ { "weeks": "1-4", "name": "Base", "focus": "one concise sentence" } ],
+ "weeklyStructure": [ { "day": "Monday", "type": "Easy Run" | "Tempo" | "Intervals" | "Long Run" | "Strength" | "Rest" | "Cross Train", "detail": "concise, e.g. 6 km easy + strides" } ],
+ "paces": [ { "label": "Easy", "pace": "e.g. 6:10/km", "note": "short note" } ],
+ "strength": [ { "day": "e.g. Tuesday", "name": "session name", "exercises": [ { "name": "Back Squat", "sets": "4x5" } ] } ],
+ "tips": [ "concise actionable tip" ]
+}
+Include 3-4 phases, exactly 7 days in weeklyStructure, 5 paces (Easy, Long Run, Tempo, Interval, Goal Race Pace), 2 strength sessions with 4-5 exercises each, and 5 tips.`;
+
+    try {
+      const ai = await tryAI(prompt, "object");
+      const result = normalizePlan(shapeOK(ai) ? ai : buildLocalPlan(f, displayUnit));
+      setPaceUnit(displayUnit === "imperial" ? "mi" : "km");
+      setPlan(result);
+      setStep("results");
+    } catch (e) {
+      setErr(e && e.message ? e.message : "Something went wrong building your plan.");
+      setStep("error");
+    }
+  }
+
+  async function generateWeeks() {
+    if (!plan) return;
+    setErr("");
+    setWeeksLoading(true);
+    const a = describeAthlete();
+    const n = Math.min(parseInt(plan.assessment?.recommendedWeeks, 10) || 12, 16);
+    const phases = (plan.phases || []).map((p) => `${p.weeks}: ${p.name}`).join("; ");
+    const prompt = `You are an elite running coach. For this athlete training for a ${f.distance} (current PB ${a.cur}, target ${plan.assessment?.realisticGoalTime || a.goal}, ${f.days} days/week, phases: ${phases}), write a week-by-week progression for exactly ${n} weeks.
+
+Respond with ONLY a valid JSON array, no markdown or preamble. Be very concise. Schema:
+[ { "week": 1, "phase": "Base", "totalDistance": "e.g. 28 km", "summary": "short focus, max 8 words", "highlights": ["Long run: 8 km easy", "Intervals: 6x400m", "2 strength sessions"] } ]
+Show realistic progressive overload and a taper in the final 1-2 weeks. Exactly 3 highlights per week.`;
+    try {
+      const ai = await tryAI(prompt, "array");
+      const arr = Array.isArray(ai) && ai.length ? ai : buildLocalWeeks(plan, f, displayUnit);
+      setWeeks(arr);
+    } catch (e) {
+      setWeeks(buildLocalWeeks(plan, f, displayUnit));
+    } finally {
+      setWeeksLoading(false);
+    }
+  }
+
+  function restart() {
+    setStep("landing"); setWizard(0); setPlan(null); setWeeks(null);
+    setErr(""); setOpenWeek(null);
+  }
+
+  /* ---------- render ---------- */
+  return (
+    <div className="pf-root">
+      <style>{FONTS_AND_CSS}</style>
+      <div className="pf-wrap">
+        <div className="pf-top">
+          <div className="pf-brand"><span className="pf-dot" />PaceForge</div>
+          <div className="pf-step-tag">
+            {step === "landing" && "AI Running Coach"}
+            {step === "form" && `Step ${wizard + 1} / 3`}
+            {step === "loading" && "Working…"}
+            {step === "error" && "Try Again"}
+            {step === "results" && "Your Plan"}
+          </div>
+        </div>
+
+        {step === "landing" && <Landing onStart={() => { setStep("form"); setWizard(0); }} />}
+
+        {step === "form" && (
+          <div className="pf-fade">
+            <div className="pf-card">
+              <div className="pf-prog">
+                {[0, 1, 2].map((i) => (
+                  <div className="pf-prog-seg" key={i}>
+                    <div className="pf-prog-fill" style={{ width: wizard >= i ? "100%" : "0%" }} />
+                  </div>
+                ))}
+              </div>
+
+              {wizard === 0 && (
+                <StepYou f={f} set={set} heightUnit={heightUnit} setHeightUnit={setHeightUnit} weightUnit={weightUnit} setWeightUnit={setWeightUnit} />
+              )}
+              {wizard === 1 && (
+                <StepDistance f={f} set={set} />
+              )}
+              {wizard === 2 && (
+                <StepTimes f={f} set={set} showHours={showHours} distance={f.distance} />
+              )}
+
+              {err && <div className="pf-err">{err}</div>}
+
+              <div className="pf-nav">
+                <button className="pf-btn" onClick={back}>{wizard === 0 ? "Back" : "Previous"}</button>
+                <button className="pf-btn primary" onClick={next}>
+                  {wizard === 2 ? "Forge My Plan →" : "Continue →"}
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {step === "loading" && (
+          <div className="pf-loading pf-fade">
+            <div className="pf-runner">↗</div>
+            <div className="pf-track">
+              <div className="pf-track-bar"><div className="pf-track-fill" /></div>
+            </div>
+            <div className="pf-load-line">{LOADING_LINES[loadLine]}</div>
+          </div>
+        )}
+
+        {step === "error" && (
+          <div className="pf-loading pf-fade">
+            <div className="pf-runner" style={{ color: "var(--warn)", animation: "none" }}>!</div>
+            <h2 className="pf-display" style={{ fontSize: "34px", marginBottom: "10px" }}>Plan Hit A Wall</h2>
+            <div className="pf-load-line" style={{ marginBottom: "26px" }}>{err}</div>
+            <div style={{ display: "flex", gap: "12px", justifyContent: "center", flexWrap: "wrap" }}>
+              <button className="pf-btn primary" onClick={generate}>↻ Try Again</button>
+              <button className="pf-btn" onClick={() => { setErr(""); setStep("form"); }}>Edit My Details</button>
+            </div>
+          </div>
+        )}
+
+        {step === "results" && plan && (
+          <Results
+            plan={plan}
+            inputs={describeAthlete()}
+            distance={f.distance}
+            units={displayUnit}
+            paceUnit={paceUnit}
+            setPaceUnit={setPaceUnit}
+            weeks={weeks}
+            weeksLoading={weeksLoading}
+            generateWeeks={generateWeeks}
+            openWeek={openWeek}
+            setOpenWeek={setOpenWeek}
+            restart={restart}
+            err={err}
+          />
+        )}
+      </div>
+    </div>
+  );
+}
+
+/* ---------- landing ---------- */
+function Landing({ onStart }) {
+  return (
+    <div className="pf-fade">
+      <div className="pf-hero">
+        <span className="pf-kicker">Set a PB · Train with intent</span>
+        <h1 className="pf-h1 pf-display">
+          <span className="out">Crush</span><br />Your <span className="vlt">PB.</span>
+        </h1>
+        <p className="pf-sub">
+          Tell us your numbers and the time you're chasing. Our AI coach checks whether
+          your goal is realistic, sets a smart target, and builds a complete plan —
+          runs, paces, gym work and a week-by-week schedule.
+        </p>
+        <button className="pf-cta" onClick={onStart}>
+          Start Here <span className="arr">→</span>
+        </button>
+      </div>
+
+      <div className="pf-feat">
+        <div className="pf-feat-cell">
+          <span className="pf-feat-num">01</span>
+          <h4>Honest goal check</h4>
+          <p>We assess your target against your current fitness — and set a realistic time you can actually hit.</p>
+        </div>
+        <div className="pf-feat-cell">
+          <span className="pf-feat-num">02</span>
+          <h4>Runs + gym, together</h4>
+          <p>Easy runs, tempo, intervals, long runs and structured strength sessions — the full picture.</p>
+        </div>
+        <div className="pf-feat-cell">
+          <span className="pf-feat-num">03</span>
+          <h4>Week-by-week plan</h4>
+          <p>A phased schedule with progressive overload and a proper taper into race day.</p>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ---------- step 1: about you ---------- */
+function StepYou({ f, set, heightUnit, setHeightUnit, weightUnit, setWeightUnit }) {
+  return (
+    <div>
+      <h2 className="pf-step-title pf-display">About You</h2>
+      <p className="pf-step-desc">Your body stats and how often you can train help shape the plan.</p>
+
+      <div className="pf-row">
+        <div className="pf-field">
+          <div className="pf-label-row">
+            <span className="pf-label">Height</span>
+            <div className="pf-toggle pf-unit-mini">
+              <button className={heightUnit === "cm" ? "on" : ""} onClick={() => setHeightUnit("cm")}>cm</button>
+              <button className={heightUnit === "ft" ? "on" : ""} onClick={() => setHeightUnit("ft")}>ft</button>
+            </div>
+          </div>
+          {heightUnit === "cm" ? (
+            <input className="pf-input" type="number" placeholder="178" value={f.heightCm} onChange={(e) => set("heightCm", e.target.value)} />
+          ) : (
+            <div className="pf-row">
+              <input className="pf-input" type="number" placeholder="5 ft" value={f.heightFt} onChange={(e) => set("heightFt", e.target.value)} />
+              <input className="pf-input" type="number" placeholder="10 in" value={f.heightIn} onChange={(e) => set("heightIn", e.target.value)} />
+            </div>
+          )}
+        </div>
+
+        <div className="pf-field">
+          <div className="pf-label-row">
+            <span className="pf-label">Weight</span>
+            <div className="pf-toggle pf-unit-mini">
+              <button className={weightUnit === "kg" ? "on" : ""} onClick={() => setWeightUnit("kg")}>kg</button>
+              <button className={weightUnit === "lb" ? "on" : ""} onClick={() => setWeightUnit("lb")}>lbs</button>
+            </div>
+          </div>
+          {weightUnit === "kg" ? (
+            <input className="pf-input" type="number" placeholder="72" value={f.weightKg} onChange={(e) => set("weightKg", e.target.value)} />
+          ) : (
+            <input className="pf-input" type="number" placeholder="160" value={f.weightLb} onChange={(e) => set("weightLb", e.target.value)} />
+          )}
+        </div>
+      </div>
+
+      <div className="pf-row">
+        <div className="pf-field">
+          <span className="pf-label">Experience</span>
+          <select className="pf-select" value={f.experience} onChange={(e) => set("experience", e.target.value)}>
+            <option>Beginner</option>
+            <option>Intermediate</option>
+            <option>Advanced</option>
+          </select>
+        </div>
+        <div className="pf-field">
+          <span className="pf-label">Days / week</span>
+          <select className="pf-select" value={f.days} onChange={(e) => set("days", e.target.value)}>
+            {[3, 4, 5, 6, 7].map((d) => <option key={d} value={d}>{d} days</option>)}
+          </select>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ---------- step 2: distance ---------- */
+function StepDistance({ f, set }) {
+  return (
+    <div>
+      <h2 className="pf-step-title pf-display">The Distance</h2>
+      <p className="pf-step-desc">Which race are you setting a personal best in?</p>
+      <div className="pf-dist-grid">
+        {DISTANCES.map((d) => (
+          <button
+            key={d.id}
+            className={"pf-dist" + (f.distance === d.id ? " sel" : "")}
+            onClick={() => set("distance", d.id)}
+          >
+            <span className="chk" />
+            <div className="nm pf-display">{d.label}</div>
+            <div className="sb">{d.sub}</div>
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+/* ---------- step 3: times ---------- */
+function TimeInput({ label, h, m, s, onH, onM, onS, showHours }) {
+  return (
+    <div className="pf-field">
+      <span className="pf-label">{label}</span>
+      <div className="pf-time">
+        {showHours && (
+          <>
+            <div className="seg">
+              <input className="pf-input" type="number" placeholder="0" min="0" value={h} onChange={(e) => onH(e.target.value)} />
+              <div className="pf-time-cap">hrs</div>
+            </div>
+            <span className="colon">:</span>
+          </>
+        )}
+        <div className="seg">
+          <input className="pf-input" type="number" placeholder="00" min="0" max="59" value={m} onChange={(e) => onM(e.target.value)} />
+          <div className="pf-time-cap">min</div>
+        </div>
+        <span className="colon">:</span>
+        <div className="seg">
+          <input className="pf-input" type="number" placeholder="00" min="0" max="59" value={s} onChange={(e) => onS(e.target.value)} />
+          <div className="pf-time-cap">sec</div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function StepTimes({ f, set, showHours, distance }) {
+  return (
+    <div>
+      <h2 className="pf-step-title pf-display">Your Times</h2>
+      <p className="pf-step-desc">Your current {distance} PB and the time you're chasing.</p>
+      <TimeInput
+        label="Current PB"
+        h={f.curH} m={f.curM} s={f.curS}
+        onH={(v) => set("curH", v)} onM={(v) => set("curM", v)} onS={(v) => set("curS", v)}
+        showHours={showHours}
+      />
+      <TimeInput
+        label="Goal Time"
+        h={f.goalH} m={f.goalM} s={f.goalS}
+        onH={(v) => set("goalH", v)} onM={(v) => set("goalM", v)} onS={(v) => set("goalS", v)}
+        showHours={showHours}
+      />
+      <div className="pf-field">
+        <span className="pf-label">Weeks until your race (optional)</span>
+        <input className="pf-input" type="number" placeholder="Leave blank and we'll recommend a realistic length" value={f.weeksAvail} onChange={(e) => set("weeksAvail", e.target.value)} />
+      </div>
+    </div>
+  );
+}
+
+/* ---------- results ---------- */
+const SESSION_CLASS = (type) => {
+  if (type === "Rest") return "rest";
+  if (type === "Strength" || type === "Cross Train") return "gym";
+  return "run";
+};
+
+function Results({ plan, inputs, distance, units, paceUnit, setPaceUnit, weeks, weeksLoading, generateWeeks, openWeek, setOpenWeek, restart, err }) {
+  const a = plan.assessment || {};
+  const feas = (a.feasibility || "ambitious").toLowerCase();
+  const [email, setEmail] = useState("");
+  const [note, setNote] = useState("");
+  const [sending, setSending] = useState(false);
+
+  const ctx = { distance, currentPB: inputs.cur, paceUnit, weeks };
+
+  function savePDF() {
+    const ok = openPrintWindow(buildPlanHTML(plan, ctx));
+    setNote(ok
+      ? "Opened a print view — choose “Save as PDF” as the destination."
+      : "Pop-up blocked. Allow pop-ups for this site, then tap Save as PDF again.");
+  }
+
+  async function emailMe() {
+    const addr = email.trim();
+    if (!addr) { setNote("Enter your email address first."); return; }
+
+    // If a backend is configured (see EMAIL_API at top of file), send for real
+    // with the PDF attached. Otherwise, open the user's mail app pre-filled.
+    if (EMAIL_API) {
+      try {
+        setSending(true);
+        setNote("Sending your plan…");
+        const pdfBase64 = await planToPdfBase64(buildPlanHTML(plan, ctx));
+        const r = await fetch(EMAIL_API, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            to: addr,
+            subject: `Your ${distance} training plan`,
+            filename: "paceforge-plan.pdf",
+            pdfBase64,
+          }),
+        });
+        if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || r.status);
+        setNote("Sent! Check your inbox (and spam folder just in case).");
+      } catch (e) {
+        setNote("Couldn't send automatically. Opening your mail app instead…");
+        mailtoFallback(addr);
+      } finally {
+        setSending(false);
+      }
+    } else {
+      mailtoFallback(addr);
+    }
+  }
+
+  function mailtoFallback(addr) {
+    const subject = `My ${distance} training plan — target ${a.realisticGoalTime || ""}`;
+    const body = buildPlanText(plan, ctx);
+    openHref(`mailto:${encodeURIComponent(addr)}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`);
+    setNote("Opened your email app with the plan ready to send. Save as PDF if you'd like the full file to attach.");
+  }
+
+  async function copyPlan() {
+    try {
+      await navigator.clipboard.writeText(buildPlanText(plan, ctx));
+      setNote("Plan copied to your clipboard — paste it anywhere.");
+    } catch (e) {
+      setNote("Couldn't copy automatically — use Save as PDF instead.");
+    }
+  }
+
+  return (
+    <div className="pf-fade">
+      <div className="pf-res-head">
+        <h2 className="pf-display" style={{ fontSize: "clamp(34px,7vw,58px)" }}>
+          Your <span style={{ color: "var(--volt)" }}>{distance}</span> Plan
+        </h2>
+      </div>
+
+      {/* assessment */}
+      <div className={"pf-assess " + feas}>
+        <span className={"pf-verdict " + feas}>
+          {feas === "realistic" && "✓ Realistic Goal"}
+          {feas === "ambitious" && "⚡ Ambitious — But Doable"}
+          {feas === "unrealistic" && "△ Goal Adjusted"}
+        </span>
+        <div className="pf-goal-row">
+          <div className="pf-goal-block">
+            <div className="cap">Current PB</div>
+            <div className="val">{inputs.cur}</div>
+          </div>
+          <div className="pf-goal-arrow">→</div>
+          <div className="pf-goal-block">
+            <div className="cap">Realistic Target</div>
+            <div className="val tgt">{a.realisticGoalTime || inputs.goal}</div>
+          </div>
+          <div className="pf-goal-block">
+            <div className="cap">Plan Length</div>
+            <div className="val">{a.recommendedWeeks || "—"}<span style={{ fontSize: "20px" }}> wks</span></div>
+          </div>
+        </div>
+        <p>{a.summary}</p>
+      </div>
+
+      {/* overview + phases */}
+      <div className="pf-grid-2">
+        <div className="pf-panel">
+          <h3>Overview</h3>
+          <div className="h-sub">Where you start and where you build to</div>
+          <div className="pf-stat-row"><span className="k">Current level</span><span className="v">{a.currentLevel || "—"}</span></div>
+          <div className="pf-stat-row"><span className="k">Starting volume</span><span className="v">{plan.mileage?.startWeekly || "—"}/wk</span></div>
+          <div className="pf-stat-row"><span className="k">Peak volume</span><span className="v">{plan.mileage?.peakWeekly || "—"}/wk</span></div>
+          <div className="pf-stat-row"><span className="k">Total length</span><span className="v">{a.recommendedWeeks || "—"} weeks</span></div>
+        </div>
+        <div className="pf-panel">
+          <h3>Phases</h3>
+          <div className="h-sub">How the block is structured</div>
+          {(plan.phases || []).map((p, i) => (
+            <div className="pf-phase" key={i}>
+              <div className="wk">{p.weeks}</div>
+              <div>
+                <div className="nm">{p.name}</div>
+                <div className="fc">{p.focus}</div>
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {/* weekly structure */}
+      <div className="pf-section-title">Typical Training Week</div>
+      <div className="pf-week-grid">
+        {(plan.weeklyStructure || []).map((d, i) => (
+          <div className={"pf-day " + (d.type === "Rest" ? "rest" : "")} key={i}>
+            <div className="dn">{d.day}</div>
+            <div className={"ss " + SESSION_CLASS(d.type)}>{d.type}</div>
+            <div className="dt">{d.detail}</div>
+          </div>
+        ))}
+      </div>
+
+      {/* paces + strength */}
+      <div className="pf-grid-2">
+        <div>
+          <div className="pf-pace-head">
+            <div className="pf-section-title" style={{ margin: "34px 0 0" }}>Your Paces</div>
+            <div className="pf-toggle pf-pace-toggle">
+              <button className={paceUnit === "km" ? "on" : ""} onClick={() => setPaceUnit("km")}>/ km</button>
+              <button className={paceUnit === "mi" ? "on" : ""} onClick={() => setPaceUnit("mi")}>/ mi</button>
+            </div>
+          </div>
+          {(plan.paces || []).map((p, i) => (
+            <div className="pf-pace" key={i}>
+              <div>
+                <div className="pl">{p.label}</div>
+                <div className="pn">{p.note}</div>
+              </div>
+              <div className="pv">{fmtPaceVal(p.secPerKm, paceUnit)}</div>
+            </div>
+          ))}
+        </div>
+        <div>
+          <div className="pf-section-title">Gym Work</div>
+          <div className="pf-panel">
+            {(plan.strength || []).map((g, i) => (
+              <div className="pf-gym" key={i}>
+                <div className="pf-gym-head">
+                  <span className="gd">{g.day}</span>
+                  <span className="gn">{g.name}</span>
+                </div>
+                {(g.exercises || []).map((ex, j) => (
+                  <div className="pf-ex" key={j}>
+                    <span className="en">{ex.name}</span>
+                    <span className="es">{ex.sets}</span>
+                  </div>
+                ))}
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+
+      {/* tips */}
+      <div className="pf-section-title">Coach's Notes</div>
+      <div className="pf-panel">
+        {(plan.tips || []).map((t, i) => (
+          <div className="pf-tip" key={i}>
+            <span className="ti">{String(i + 1).padStart(2, "0")}</span>
+            <span>{t}</span>
+          </div>
+        ))}
+      </div>
+
+      {/* week-by-week */}
+      <div className="pf-section-title">Week-By-Week Schedule</div>
+      {!weeks && (
+        <button className="pf-btn primary pf-wbw-btn" onClick={generateWeeks} disabled={weeksLoading}>
+          {weeksLoading ? "Building your full schedule…" : "Generate full week-by-week schedule →"}
+        </button>
+      )}
+      {weeks && (
+        <div>
+          {weeks.map((w, i) => {
+            const open = openWeek === i;
+            return (
+              <div className={"pf-wk-item" + (open ? " open" : "")} key={i}>
+                <div className="pf-wk-bar" onClick={() => setOpenWeek(open ? null : i)}>
+                  <div className="num">W{w.week}</div>
+                  <div className="info">
+                    <div className="ph">{w.phase}</div>
+                    <div className="sm">{w.summary}</div>
+                  </div>
+                  <div className="dist">{w.totalDistance}</div>
+                  <div className="car">›</div>
+                </div>
+                {open && (
+                  <div className="pf-wk-body">
+                    {(w.highlights || []).map((h, j) => (
+                      <div className="pf-hl" key={j}>{h}</div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      )}
+      {err && <div className="pf-err">{err}</div>}
+
+      {/* export & share */}
+      <div className="pf-section-title">Get Your Plan</div>
+      <div className="pf-panel">
+        <button className="pf-btn primary pf-wbw-btn" onClick={savePDF}>⬇ Save as PDF</button>
+        <p className="pf-share-hint">Opens a clean, printable version — pick “Save as PDF” as the destination. This is the full plan, including the week-by-week schedule if you've generated it.</p>
+
+        <div className="pf-share-row" style={{ marginTop: "18px" }}>
+          <input className="pf-input" type="email" placeholder="you@email.com" value={email} onChange={(e) => setEmail(e.target.value)} />
+          <button className="pf-btn" onClick={emailMe} disabled={sending}>{sending ? "Sending…" : "✉ Email me"}</button>
+        </div>
+
+        <button className="pf-btn pf-copy-btn" onClick={copyPlan}>⧉ Copy plan as text</button>
+        {note && <div className="pf-share-note">{note}</div>}
+        <p className="pf-share-hint" style={{ marginTop: "14px", opacity: 0.7 }}>
+          {EMAIL_API
+            ? "We'll email the full plan to you as a PDF."
+            : "Email opens your own mail app with the plan pre-filled. To have the PDF delivered automatically, connect the email backend (see the deployment guide)."}
+        </p>
+      </div>
+
+      <div className="pf-foot">
+        <button className="pf-restart" onClick={restart}>↺ Start a new plan</button>
+        <p className="pf-disclaimer">
+          PaceForge gives AI-generated training guidance for healthy adults. Build up gradually,
+          listen to your body, and check with a doctor before starting a new training programme.
+        </p>
+      </div>
+    </div>
+  );
+}
