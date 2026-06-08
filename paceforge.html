@@ -3,24 +3,20 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>PaceForge — AI Running Coach</title>
+<title>PaceForge — Run Coaching by Arem</title>
 <meta name="description" content="Build a personalised running plan to smash your PB — paces, gym work and a week-by-week schedule." />
 <style>
   html,body{margin:0;background:#0a0b0a;color:#f3f5ef;font-family:sans-serif}
   #root{min-height:100vh}
   .boot{display:flex;align-items:center;justify-content:center;height:100vh;color:#8b9183;font-size:14px;letter-spacing:.1em}
 </style>
-<!-- React + ReactDOM (UMD) -->
 <script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin></script>
 <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin></script>
-<!-- Babel: lets us run the JSX directly with no build step -->
 <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
-<!-- html2pdf: real PDF download + attachment generation -->
 <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.2/html2pdf.bundle.min.js"></script>
 </head>
 <body>
 <div id="root"><div class="boot">Loading PaceForge…</div></div>
-
 <script type="text/babel" data-presets="react">
 const { useState, useEffect, useRef } = React;
 /* ============================================================
@@ -255,7 +251,22 @@ const FONTS_AND_CSS = `
 .pf-hl{ font-size:13.5px; color:var(--muted); padding:5px 0; display:flex; gap:8px; }
 .pf-hl::before{ content:"›"; color:var(--volt); font-weight:800; }
 
-.pf-foot{ text-align:center; margin-top:50px; color:var(--muted); font-size:13px; }.pf-restart{ background:none; border:1px solid var(--line); color:var(--text); padding:13px 26px; border-radius:12px; font-family:'Manrope'; font-weight:700; cursor:pointer; transition:all .15s; }
+.pf-foot{ text-align:center; margin-top:50px; color:var(--muted); font-size:13px; }
+
+.pf-lock{ margin-top:18px; background:linear-gradient(160deg,rgba(212,255,62,0.08),var(--surface)); border:1px solid var(--line); border-radius:22px; padding:34px; text-align:center; }
+.pf-lock-icon{ font-size:30px; margin-bottom:10px; }
+.pf-lock-list{ list-style:none; padding:0; margin:18px auto; max-width:420px; text-align:left; }
+.pf-lock-list li{ padding:9px 0 9px 28px; position:relative; font-size:14.5px; border-bottom:1px solid var(--line); }
+.pf-lock-list li:last-child{ border-bottom:none; }
+.pf-lock-list li::before{ content:"✓"; position:absolute; left:0; color:var(--volt); font-weight:800; }
+.pf-price{ font-family:'Anton'; font-size:54px; color:var(--text); margin:14px 0 4px; }
+.pf-price span{ font-family:'Manrope'; font-size:15px; font-weight:700; color:var(--muted); letter-spacing:0; }
+.pf-price-was{ font-family:'Anton'; font-size:30px; color:var(--muted); text-decoration:line-through; margin-right:14px; opacity:0.7; }
+.pf-price-badge{ display:inline-block; background:var(--volt); color:#0a0b0a; font-weight:800; font-size:12px; letter-spacing:0.08em; text-transform:uppercase; padding:6px 14px; border-radius:100px; margin-top:6px; }
+.pf-lock-cta{ margin-top:8px; }
+.pf-lock-note{ font-size:12.5px; color:var(--muted); margin-top:14px; max-width:380px; margin-left:auto; margin-right:auto; line-height:1.5; }
+.pf-lock-back{ display:block; margin:18px auto 0; background:none; border:none; color:var(--muted); font-family:'Manrope'; font-weight:700; font-size:14px; cursor:pointer; }
+.pf-lock-back:hover{ color:var(--text); }.pf-restart{ background:none; border:1px solid var(--line); color:var(--text); padding:13px 26px; border-radius:12px; font-family:'Manrope'; font-weight:700; cursor:pointer; transition:all .15s; }
 .pf-restart:hover{ border-color:var(--volt); color:var(--volt); }
 .pf-disclaimer{ font-size:12px; color:var(--muted); line-height:1.5; max-width:600px; margin:18px auto 0; opacity:0.7; }
 
@@ -745,7 +756,22 @@ function openHref(url) {
 /* Set this to your deployed email endpoint to send for real, e.g.
    const EMAIL_API = "https://your-app.vercel.app/api/send-email";
    Leave it as "" and the Email button just opens the user's mail app. */
-const EMAIL_API = ""; // 👉 paste your backend URL here to send real emails, e.g. "https://your-app.vercel.app/api/send-email"
+const EMAIL_API = "";
+
+/* ---- CHARGING ----
+   PRICE: what you show the customer.
+   PAYMENT_LINK: paste your Stripe Payment Link URL here. When set, the
+   "Pay & unlock" button sends the customer to Stripe; after paying, Stripe
+   returns them to your site with ?paid=true and the full plan unlocks.
+   Leave PAYMENT_LINK as "" while testing — the button then unlocks for free. */
+const PRICE = "£9.99";
+const PRICE_WAS = "£20";   // shown struck-through next to PRICE; set to "" to hide
+const PAYMENT_LINK = "";
+
+// Safe localStorage (no-ops in sandboxes that block it).
+function lsGet(k) { try { return window.localStorage.getItem(k); } catch (e) { return null; } }
+function lsSet(k, v) { try { window.localStorage.setItem(k, v); } catch (e) {} }
+function lsDel(k) { try { window.localStorage.removeItem(k); } catch (e) {} }
 
 // Render the plan HTML to a real PDF and return base64 (needs html2pdf.js
 // loaded on the page — available on your deployed site, not in the sandbox).
@@ -783,6 +809,7 @@ function App() {
   const [heightUnit, setHeightUnit] = useState("cm"); // cm | ft
   const [weightUnit, setWeightUnit] = useState("kg"); // kg | lb
   const [paceUnit, setPaceUnit] = useState("km"); // km | mi — independent toggle on results
+  const [unlocked, setUnlocked] = useState(false); // has the customer paid for this plan?
   const [err, setErr] = useState("");
   const [plan, setPlan] = useState(null);
   const [loadLine, setLoadLine] = useState(0);
@@ -806,6 +833,29 @@ function App() {
     const id = setInterval(() => setLoadLine((i) => (i + 1) % LOADING_LINES.length), 1400);
     return () => clearInterval(id);
   }, [step]);
+
+  // Returning from a Stripe payment? Unlock and restore the saved plan.
+  useEffect(() => {
+    let params;
+    try { params = new URLSearchParams(window.location.search); } catch (e) { return; }
+    if (params.get("paid") !== "true") return;
+    const saved = lsGet("pf_plan");
+    let ok = false;
+    if (saved) {
+      try {
+        const d = JSON.parse(saved);
+        if (d && d.plan) {
+          if (d.f) setF(d.f);
+          setPlan(d.plan);
+          if (d.paceUnit) setPaceUnit(d.paceUnit);
+          ok = true;
+        }
+      } catch (e) {}
+    }
+    setUnlocked(true);
+    setStep(ok ? "results" : "landing");
+    try { window.history.replaceState({}, "", window.location.pathname); } catch (e) {}
+  }, []);
 
   const distObj = DISTANCES.find((d) => d.id === f.distance);
   const showHours = distObj ? distObj.hours : false;
@@ -884,12 +934,26 @@ Include 3-4 phases, exactly 7 days in weeklyStructure, 5 paces (Easy, Long Run, 
     try {
       const ai = await tryAI(prompt, "object");
       const result = normalizePlan(shapeOK(ai) ? ai : buildLocalPlan(f, displayUnit));
-      setPaceUnit(displayUnit === "imperial" ? "mi" : "km");
+      const pu = displayUnit === "imperial" ? "mi" : "km";
+      setPaceUnit(pu);
       setPlan(result);
-      setStep("results");
+      // save so we can restore after a Stripe redirect
+      lsSet("pf_plan", JSON.stringify({ f, plan: result, paceUnit: pu }));
+      setStep(unlocked ? "results" : "paywall");
     } catch (e) {
       setErr(e && e.message ? e.message : "Something went wrong building your plan.");
       setStep("error");
+    }
+  }
+
+  function payAndUnlock() {
+    if (PAYMENT_LINK) {
+      // plan is already saved; Stripe returns to ?paid=true to unlock
+      try { window.location.href = PAYMENT_LINK; } catch (e) {}
+    } else {
+      // no payment configured yet — unlock so you can preview the full plan
+      setUnlocked(true);
+      setStep("results");
     }
   }
 
@@ -918,7 +982,7 @@ Show realistic progressive overload and a taper in the final 1-2 weeks. Exactly 
 
   function restart() {
     setStep("landing"); setWizard(0); setPlan(null); setWeeks(null);
-    setErr(""); setOpenWeek(null);
+    setErr(""); setOpenWeek(null); setUnlocked(false); lsDel("pf_plan");
   }
 
   /* ---------- render ---------- */
@@ -929,10 +993,11 @@ Show realistic progressive overload and a taper in the final 1-2 weeks. Exactly 
         <div className="pf-top">
           <div className="pf-brand"><span className="pf-dot" />PaceForge</div>
           <div className="pf-step-tag">
-            {step === "landing" && "AI Running Coach"}
+            {step === "landing" && "Coached by Arem"}
             {step === "form" && `Step ${wizard + 1} / 3`}
             {step === "loading" && "Working…"}
             {step === "error" && "Try Again"}
+            {step === "paywall" && "Unlock Plan"}
             {step === "results" && "Your Plan"}
           </div>
         </div>
@@ -992,6 +1057,19 @@ Show realistic progressive overload and a taper in the final 1-2 weeks. Exactly 
               <button className="pf-btn" onClick={() => { setErr(""); setStep("form"); }}>Edit My Details</button>
             </div>
           </div>
+        )}
+
+        {step === "paywall" && plan && (
+          <Paywall
+            plan={plan}
+            inputs={describeAthlete()}
+            distance={f.distance}
+            price={PRICE}
+            priceWas={PRICE_WAS}
+            live={!!PAYMENT_LINK}
+            onPay={payAndUnlock}
+            onBack={() => setStep("form")}
+          />
         )}
 
         {step === "results" && plan && (
@@ -1190,6 +1268,68 @@ function StepTimes({ f, set, showHours, distance }) {
       <div className="pf-field">
         <span className="pf-label">Weeks until your race (optional)</span>
         <input className="pf-input" type="number" placeholder="Leave blank and we'll recommend a realistic length" value={f.weeksAvail} onChange={(e) => set("weeksAvail", e.target.value)} />
+      </div>
+    </div>
+  );
+}
+
+/* ---------- paywall ---------- */
+function Paywall({ plan, inputs, distance, price, priceWas, live, onPay, onBack }) {
+  const a = plan.assessment || {};
+  const feas = (a.feasibility || "ambitious").toLowerCase();
+  return (
+    <div className="pf-fade">
+      <h2 className="pf-display" style={{ fontSize: "clamp(30px,6vw,48px)", marginBottom: "6px" }}>
+        Your plan is <span style={{ color: "var(--volt)" }}>ready.</span>
+      </h2>
+      <p className="pf-step-desc" style={{ marginBottom: "22px" }}>Here's your goal verdict — unlock the full programme below.</p>
+
+      {/* free teaser: the verdict + target */}
+      <div className={"pf-assess " + feas}>
+        <span className={"pf-verdict " + feas}>
+          {feas === "realistic" && "✓ Realistic Goal"}
+          {feas === "ambitious" && "⚡ Ambitious — But Doable"}
+          {feas === "unrealistic" && "△ Goal Adjusted"}
+        </span>
+        <div className="pf-goal-row">
+          <div className="pf-goal-block">
+            <div className="cap">Current PB</div>
+            <div className="val">{inputs.cur}</div>
+          </div>
+          <div className="pf-goal-arrow">→</div>
+          <div className="pf-goal-block">
+            <div className="cap">Realistic Target</div>
+            <div className="val tgt">{a.realisticGoalTime || inputs.goal}</div>
+          </div>
+          <div className="pf-goal-block">
+            <div className="cap">Plan Length</div>
+            <div className="val">{a.recommendedWeeks || "—"}<span style={{ fontSize: "20px" }}> wks</span></div>
+          </div>
+        </div>
+        <p>{a.summary}</p>
+      </div>
+
+      {/* locked CTA */}
+      <div className="pf-lock">
+        <div className="pf-lock-icon">🔒</div>
+        <h3 className="pf-display" style={{ fontSize: "26px", letterSpacing: "0.03em" }}>Unlock your full {distance} plan</h3>
+        <ul className="pf-lock-list">
+          <li>Personalised training paces (km or miles)</li>
+          <li>Full weekly structure — runs, tempo, intervals & long runs</li>
+          <li>2 structured gym sessions with exercises &amp; sets</li>
+          <li>Complete week-by-week schedule with taper</li>
+          <li>Download as PDF &amp; email it to yourself</li>
+        </ul>
+        {priceWas && <div className="pf-price-badge">Launch offer · 50% off</div>}
+        <div className="pf-price">
+          {priceWas && <span className="pf-price-was">{priceWas}</span>}
+          {price}<span> one-off</span>
+        </div>
+        <button className="pf-cta pf-lock-cta" onClick={onPay}>
+          {live ? "Pay & Unlock →" : "Unlock Plan →"}
+        </button>
+        {!live && <p className="pf-lock-note">Payment isn't connected yet, so this unlocks for free in preview. Add your Stripe link to charge for real.</p>}
+        <button className="pf-lock-back" onClick={onBack}>← Edit my details</button>
       </div>
     </div>
   );
