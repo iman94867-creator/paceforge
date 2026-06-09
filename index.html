@@ -758,15 +758,19 @@ function openHref(url) {
    Leave it as "" and the Email button just opens the user's mail app. */
 const EMAIL_API = "/api/send-email";
 
-/* ---- CHARGING ----
-   PRICE: what you show the customer.
-   PAYMENT_LINK: paste your Stripe Payment Link URL here. When set, the
-   "Pay & unlock" button sends the customer to Stripe; after paying, Stripe
-   returns them to your site with ?paid=true and the full plan unlocks.
-   Leave PAYMENT_LINK as "" while testing — the button then unlocks for free. */
+/* ---- CHARGING (secure Stripe Checkout) ----
+   PRICE / PRICE_WAS: what the customer sees (cosmetic only).
+   SECURE_CHECKOUT: when true, "Pay & Unlock" asks your backend to create a
+   Stripe Checkout session, sends the customer to Stripe to pay, then on return
+   VERIFIES with Stripe that they actually paid before unlocking — so the unlock
+   can't be faked by editing the URL. The real amount charged is set in
+   api/create-checkout-session.js (unit_amount, in pence).
+   Set SECURE_CHECKOUT to false to unlock free for previewing the full plan. */
 const PRICE = "£9.99";
 const PRICE_WAS = "£20";   // shown struck-through next to PRICE; set to "" to hide
-const PAYMENT_LINK = "";
+const SECURE_CHECKOUT = true;                       // false = free preview, no payment
+const CHECKOUT_API = "/api/create-checkout-session"; // creates the Stripe session
+const VERIFY_API   = "/api/verify-session";          // confirms payment on return
 
 // Safe localStorage (no-ops in sandboxes that block it).
 function lsGet(k) { try { return window.localStorage.getItem(k); } catch (e) { return null; } }
@@ -834,27 +838,45 @@ function App() {
     return () => clearInterval(id);
   }, [step]);
 
-  // Returning from a Stripe payment? Unlock and restore the saved plan.
+  // Returning from Stripe? Verify the payment with Stripe, then unlock + restore.
   useEffect(() => {
     let params;
     try { params = new URLSearchParams(window.location.search); } catch (e) { return; }
-    if (params.get("paid") !== "true") return;
-    const saved = lsGet("pf_plan");
-    let ok = false;
-    if (saved) {
-      try {
-        const d = JSON.parse(saved);
-        if (d && d.plan) {
-          if (d.f) setF(d.f);
-          setPlan(d.plan);
-          if (d.paceUnit) setPaceUnit(d.paceUnit);
-          ok = true;
-        }
-      } catch (e) {}
-    }
-    setUnlocked(true);
-    setStep(ok ? "results" : "landing");
+    const sessionId = params.get("session_id");
+    if (!sessionId) return;
+    // strip the id out of the address bar straight away
     try { window.history.replaceState({}, "", window.location.pathname); } catch (e) {}
+
+    (async () => {
+      let paid = false;
+      if (SECURE_CHECKOUT) {
+        // ask our backend (which asks Stripe) whether this session was really paid
+        try {
+          const r = await fetch(VERIFY_API + "?session_id=" + encodeURIComponent(sessionId));
+          const d = await r.json();
+          paid = !!(d && d.paid);
+        } catch (e) { paid = false; }
+      } else {
+        paid = true; // free-preview mode
+      }
+      if (!paid) return; // not a genuine payment — stay locked
+
+      const saved = lsGet("pf_plan");
+      let ok = false;
+      if (saved) {
+        try {
+          const d = JSON.parse(saved);
+          if (d && d.plan) {
+            if (d.f) setF(d.f);
+            setPlan(d.plan);
+            if (d.paceUnit) setPaceUnit(d.paceUnit);
+            ok = true;
+          }
+        } catch (e) {}
+      }
+      setUnlocked(true);
+      setStep(ok ? "results" : "landing");
+    })();
   }, []);
 
   const distObj = DISTANCES.find((d) => d.id === f.distance);
@@ -946,12 +968,20 @@ Include 3-4 phases, exactly 7 days in weeklyStructure, 5 paces (Easy, Long Run, 
     }
   }
 
-  function payAndUnlock() {
-    if (PAYMENT_LINK) {
-      // plan is already saved; Stripe returns to ?paid=true to unlock
-      try { window.location.href = PAYMENT_LINK; } catch (e) {}
+  async function payAndUnlock() {
+    if (SECURE_CHECKOUT) {
+      // the plan is already saved; create a Stripe Checkout session, then go pay.
+      // On return, the effect above verifies the payment before unlocking.
+      try {
+        const r = await fetch(CHECKOUT_API, { method: "POST" });
+        const d = await r.json();
+        if (d && d.url) { window.location.href = d.url; return; }
+        window.alert("Couldn't start checkout — please try again in a moment.");
+      } catch (e) {
+        window.alert("Couldn't reach the payment server — please try again in a moment.");
+      }
     } else {
-      // no payment configured yet — unlock so you can preview the full plan
+      // free-preview mode — unlock so you can see the full plan
       setUnlocked(true);
       setStep("results");
     }
@@ -1066,7 +1096,7 @@ Show realistic progressive overload and a taper in the final 1-2 weeks. Exactly 
             distance={f.distance}
             price={PRICE}
             priceWas={PRICE_WAS}
-            live={!!PAYMENT_LINK}
+            live={SECURE_CHECKOUT}
             onPay={payAndUnlock}
             onBack={() => setStep("form")}
           />
@@ -1328,7 +1358,7 @@ function Paywall({ plan, inputs, distance, price, priceWas, live, onPay, onBack 
         <button className="pf-cta pf-lock-cta" onClick={onPay}>
           {live ? "Pay & Unlock →" : "Unlock Plan →"}
         </button>
-        {!live && <p className="pf-lock-note">Payment isn't connected yet, so this unlocks for free in preview. Add your Stripe link to charge for real.</p>}
+        {!live && <p className="pf-lock-note">Payment is off for preview, so this unlocks for free. Set SECURE_CHECKOUT = true in index.html to charge for real.</p>}
         <button className="pf-lock-back" onClick={onBack}>← Edit my details</button>
       </div>
     </div>
