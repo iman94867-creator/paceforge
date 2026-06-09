@@ -251,6 +251,10 @@ const FONTS_AND_CSS = `
 .pf-wk-body{ padding:0 18px 18px 90px; }
 .pf-hl{ font-size:13.5px; color:var(--muted); padding:5px 0; display:flex; gap:8px; }
 .pf-hl::before{ content:"›"; color:var(--volt); font-weight:800; }
+.pf-day{ display:flex; gap:12px; padding:6px 0; border-bottom:1px solid var(--line); font-size:13.5px; }
+.pf-day:last-child{ border-bottom:none; }
+.pf-day .dlab{ flex:none; width:40px; font-weight:800; color:var(--volt); text-transform:uppercase; letter-spacing:.04em; font-size:12px; }
+.pf-day .dses{ color:var(--text); }
 
 .pf-foot{ text-align:center; margin-top:50px; color:var(--muted); font-size:13px; }
 
@@ -607,22 +611,32 @@ function buildLocalWeeks(plan, f, units) {
     const longWk = Math.max(6, Math.round(vol * 0.32));
     const phase = phaseFor(wk);
     const cut = wk <= core && wk % 4 === 0;
-    const quality = (wk % 2 === 0)
-      ? `Intervals: ${f.distance === "1 Mile" ? "8 × 400 m" : "6 × 800 m"} @ ${fmtPace(p5k * 0.97, imperial)}`
-      : `Tempo: ${15 + Math.min(15, wk)} min @ ${fmtPace(p5k * 1.06, imperial)}`;
+    const intervalSess = `${f.distance === "1 Mile" ? "8×400 m" : "6×800 m"} @ ${fmtPace(p5k * 0.97, imperial)}`;
+    const tempoSess = `Tempo ${15 + Math.min(15, wk)} min @ ${fmtPace(p5k * 1.06, imperial)}`;
+    const easySess = `Easy ${toUd(Math.max(4, Math.round(vol * 0.18)))} ${ud}`;
+    const longSess = `Long run ${toUd(longWk)} ${ud} easy`;
+    const strengthSess = wk === W ? "Strength (light)" : "Strength + core";
     const summary = wk > core ? "Taper — sharpen and recover for race day"
       : cut ? "Recovery week — absorb the training"
       : phase === "Base" ? "Aerobic base building"
       : phase === "Build" ? "Threshold focus, longer long run"
       : "Race-specific sharpening";
-    out.push({
-      week: wk, phase, totalDistance: `${toUd(vol)} ${ud}`, summary,
-      highlights: [
-        `Long run: ${toUd(longWk)} ${ud} easy`,
-        quality,
-        wk === W ? "1 strength session (light)" : "2 strength sessions",
-      ],
+    const tmpl = (plan.weeklyStructure || []);
+    const days = (tmpl.length ? tmpl : [
+      { day: "Mon", type: "Rest" }, { day: "Tue", type: "Intervals" }, { day: "Wed", type: "Easy Run" },
+      { day: "Thu", type: "Tempo" }, { day: "Fri", type: "Rest" }, { day: "Sat", type: "Long Run" }, { day: "Sun", type: "Strength" },
+    ]).map((d) => {
+      const t = (d.type || "").toLowerCase();
+      let s = easySess;
+      if (t.includes("long")) s = longSess;
+      else if (t.includes("interval")) s = intervalSess;
+      else if (t.includes("tempo")) s = tempoSess;
+      else if (t.includes("strength")) s = strengthSess;
+      else if (t.includes("rest")) s = "Rest";
+      else if (t.includes("cross")) s = "Cross-train 30–40 min";
+      return { d: String(d.day || "").slice(0, 3), s };
     });
+    out.push({ week: wk, phase, totalDistance: `${toUd(vol)} ${ud}`, summary, days });
   }
   return out;
 }
@@ -660,38 +674,71 @@ function buildPlanHTML(plan, ctx) {
     `<div class="gym"><div class="gh">${esc(g.day)} · ${esc(g.name)}</div>` +
     (g.exercises || []).map((e) => `<div class="ex"><span>${esc(e.name)}</span><b>${esc(e.sets)}</b></div>`).join("") + `</div>`).join("");
   const tips = (plan.tips || []).map((t) => `<li>${esc(t)}</li>`).join("");
-  const weeks = (ctx.weeks || []).map((w) =>
-    `<tr><td class="wk">W${esc(w.week)}</td><td><b>${esc(w.totalDistance)}</b> · ${esc(w.phase)}<div class="mut">${esc(w.summary)} — ${esc((w.highlights || []).join(" · "))}</div></td></tr>`).join("");
+  const weeks = (ctx.weeks || []).map((w) => {
+    let body;
+    if (w.days && w.days.length) {
+      body = `<div class="wkdays">` + w.days.map((d) =>
+        `<div class="wkday"><span class="wd">${esc(d.d)}</span><span class="ws">${esc(d.s)}</span></div>`).join("") + `</div>`;
+    } else {
+      body = `<div class="chips">` + (w.highlights || []).map((h) => `<span class="chip">${esc(h)}</span>`).join("") + `</div>`;
+    }
+    return `<div class="wkrow"><div class="wkbadge">W${esc(w.week)}</div><div class="wkmain"><div class="wktop"><span class="wkphase">${esc(w.phase)}</span><span class="wkdist">${esc(w.totalDistance)}</span></div><div class="wksum">${esc(w.summary)}</div>${body}</div></div>`;
+  }).join("");
 
   return `<!doctype html><html><head><meta charset="utf-8"><title>PaceForge — ${esc(ctx.distance)} Plan</title>
 <style>
-@page{margin:18mm}
+@page{margin:16mm}
 *{box-sizing:border-box}
-body{font-family:-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;color:#15171a;margin:0;line-height:1.45}
-h1{font-size:30px;margin:0 0 2px;letter-spacing:-.5px}
+body{font-family:-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;color:#15171a;margin:0;padding:6px 22px;line-height:1.45;font-size:13px}
+.hdr{display:flex;align-items:center;gap:12px;padding-bottom:14px;border-bottom:3px solid #4c9a00;margin-bottom:16px}
+.hdr .wm{font-weight:800;letter-spacing:.14em;font-size:15px}
+.hdr .wm .g{color:#4c9a00}
+.hdr .tag{font-size:9.5px;letter-spacing:.14em;text-transform:uppercase;color:#7a8088;margin-top:3px}
+h1{font-size:26px;margin:2px 0;letter-spacing:-.4px}
 .brand{color:#3a8a00;font-weight:800;letter-spacing:.16em;text-transform:uppercase;font-size:12px}
-.verdict{display:inline-block;background:#eef9d6;color:#3a6e00;font-weight:700;font-size:12px;padding:5px 12px;border-radius:20px;margin:14px 0}
-.goal{display:flex;gap:34px;margin:8px 0 4px;flex-wrap:wrap}
-.goal .b .c{font-size:11px;letter-spacing:.1em;text-transform:uppercase;color:#7a8088}
-.goal .b .v{font-size:30px;font-weight:800}
-.goal .b .v.t{color:#3a8a00}
-.sec{font-size:16px;font-weight:800;text-transform:uppercase;letter-spacing:.06em;margin:22px 0 8px;border-bottom:2px solid #15171a;padding-bottom:4px}
+.verdict{display:inline-block;background:#f1fbd6;color:#3a6e00;font-weight:700;font-size:11px;padding:5px 12px;border-radius:20px;margin:10px 0 16px}
+.goal{display:flex;gap:10px;margin:8px 0 4px;flex-wrap:wrap}
+.goal .b{flex:1;min-width:118px;border:1px solid #e6e8ea;border-radius:10px;padding:10px 12px}
+.goal .b .c{font-size:9.5px;letter-spacing:.1em;text-transform:uppercase;color:#7a8088}
+.goal .b .v{font-size:22px;font-weight:800;margin-top:2px}
+.goal .b .v.t{color:#4c9a00}
+.summary{color:#4b5563;max-width:680px;margin:12px 0 0}
+.sec{font-size:14px;font-weight:800;text-transform:uppercase;letter-spacing:.06em;margin:24px 0 10px;border-bottom:2px solid #15171a;padding-bottom:4px;break-after:avoid;page-break-after:avoid}
 table{width:100%;border-collapse:collapse}
 td{padding:7px 6px;border-bottom:1px solid #e6e8ea;vertical-align:top;font-size:13px}
 .mut{color:#7a8088;font-size:12px}
-.pace{text-align:right;font-weight:800;color:#3a8a00;white-space:nowrap;font-size:15px}
-.wk{font-weight:800;color:#3a8a00;white-space:nowrap;width:64px}
+.pace{text-align:right;font-weight:800;color:#4c9a00;white-space:nowrap;font-size:15px}
+.wk{font-weight:800;color:#4c9a00;white-space:nowrap;width:64px}
 .week{display:flex;flex-wrap:wrap;gap:8px}
-.day{flex:1;min-width:90px;border:1px solid #e6e8ea;border-radius:8px;padding:8px}
-.dn{font-size:10px;letter-spacing:.08em;text-transform:uppercase;color:#7a8088}
+.day{flex:1;min-width:92px;border:1px solid #e6e8ea;border-radius:8px;padding:8px;break-inside:avoid;page-break-inside:avoid}
+.dn{font-size:9.5px;letter-spacing:.08em;text-transform:uppercase;color:#7a8088}
 .dt2{font-weight:800;font-size:13px;margin:2px 0}
-.gym{margin-bottom:10px}
+.gym{margin-bottom:10px;break-inside:avoid;page-break-inside:avoid}
 .gh{font-weight:800;font-size:13px;margin-bottom:4px}
 .ex{display:flex;justify-content:space-between;font-size:13px;padding:3px 0;border-bottom:1px solid #eee}
 ul{margin:6px 0;padding-left:18px}li{font-size:13px;margin:4px 0}
-.foot{margin-top:24px;color:#9aa0a6;font-size:11px;border-top:1px solid #e6e8ea;padding-top:8px}
+.wkrow{display:flex;gap:14px;align-items:flex-start;border:1px solid #e6e8ea;border-radius:10px;padding:11px 13px;margin-bottom:8px;break-inside:avoid;page-break-inside:avoid}
+.wkbadge{flex:none;width:44px;height:44px;border-radius:10px;background:#f1fbd6;color:#3f7a00;font-weight:800;display:flex;align-items:center;justify-content:center;font-size:15px}
+.wkmain{flex:1;min-width:0}
+.wktop{display:flex;justify-content:space-between;gap:10px;align-items:baseline}
+.wkphase{font-size:10px;letter-spacing:.07em;text-transform:uppercase;color:#3f7a00;font-weight:800}
+.wkdist{font-weight:800;font-size:14px;white-space:nowrap}
+.wksum{font-size:12.5px;margin:3px 0 7px;color:#374151}
+.chips{display:flex;flex-wrap:wrap;gap:6px}
+.chip{font-size:11px;background:#f7f8f5;border:1px solid #e6e8ea;border-radius:6px;padding:3px 8px;color:#374151}
+.wkdays{display:grid;grid-template-columns:1fr 1fr;gap:1px 18px;margin-top:2px}
+.wkday{display:flex;gap:8px;font-size:11.5px;padding:3px 0;border-bottom:1px solid #f0f1ee}
+.wkday .wd{flex:none;width:30px;font-weight:800;color:#3f7a00;text-transform:uppercase;font-size:10px;letter-spacing:.04em}
+.wkday .ws{color:#374151}
+.foot{margin-top:26px;color:#9aa0a6;font-size:10.5px;border-top:1px solid #e6e8ea;padding-top:8px}
 </style></head><body>
-<div class="brand">● PaceForge</div>
+<div class="hdr">
+  <svg width="30" height="30" viewBox="0 0 120 120" fill="none" stroke-linecap="round" stroke-linejoin="round" stroke-width="13">
+    <path d="M40 38 L62 60 L40 82" stroke="#9fc46a"/>
+    <path d="M64 38 L86 60 L64 82" stroke="#4c9a00"/>
+  </svg>
+  <div><div class="wm">PACE<span class="g">FORGE</span></div><div class="tag">Run Coaching by Arem</div></div>
+</div>
 <h1>Your ${esc(ctx.distance)} Training Plan</h1>
 <div class="verdict">${esc(verdict)}</div>
 <div class="goal">
@@ -700,13 +747,13 @@ ul{margin:6px 0;padding-left:18px}li{font-size:13px;margin:4px 0}
   <div class="b"><div class="c">Plan Length</div><div class="v">${esc(a.recommendedWeeks || "")} wks</div></div>
   <div class="b"><div class="c">Weekly Volume</div><div class="v">${esc((plan.mileage || {}).startWeekly)}→${esc((plan.mileage || {}).peakWeekly)}</div></div>
 </div>
-<p class="mut" style="max-width:640px">${esc(a.summary)}</p>
+<p class="summary">${esc(a.summary)}</p>
 <div class="sec">Training Phases</div><table>${phaseRows}</table>
 <div class="sec">Typical Training Week</div><div class="week">${weekCols}</div>
 <div class="sec">Your Paces (${esc(u === "mi" ? "per mile" : "per km")})</div><table>${paceRows}</table>
 <div class="sec">Gym Work</div>${gym}
 <div class="sec">Coach's Notes</div><ul>${tips}</ul>
-${weeks ? `<div class="sec">Week-By-Week Schedule</div><table>${weeks}</table>` : ""}
+${weeks ? `<div class="sec">Week-By-Week Schedule</div>${weeks}` : ""}
 <div class="foot">Generated by PaceForge. AI-assisted training guidance for healthy adults — build up gradually and consult a doctor before starting a new programme.</div>
 </body></html>`;
 }
@@ -792,7 +839,7 @@ async function planToPdfBase64(htmlDocString) {
   document.body.appendChild(el);
   try {
     const blob = await h2p().from(el).set({
-      margin: 8,
+      margin: 12,
       jsPDF: { unit: "mm", format: "a4", orientation: "portrait" },
       html2canvas: { scale: 2, useCORS: true },
       pagebreak: { mode: ["css", "legacy"] },
@@ -996,11 +1043,14 @@ Include 3-4 phases, exactly 7 days in weeklyStructure, 5 paces (Easy, Long Run, 
     const a = describeAthlete();
     const n = Math.min(parseInt(plan.assessment?.recommendedWeeks, 10) || 12, 16);
     const phases = (plan.phases || []).map((p) => `${p.weeks}: ${p.name}`).join("; ");
+    const pattern = (plan.weeklyStructure || []).map((d) => `${d.day}:${d.type}`).join(", ");
     const prompt = `You are an elite running coach. For this athlete training for a ${f.distance} (current PB ${a.cur}, target ${plan.assessment?.realisticGoalTime || a.goal}, ${f.days} days/week, phases: ${phases}), write a week-by-week progression for exactly ${n} weeks.
 
+The athlete's weekly day pattern is: ${pattern}. Keep each day's role the same every week (rest days stay rest) but progress the actual sessions from week to week.
+
 Respond with ONLY a valid JSON array, no markdown or preamble. Be very concise. Schema:
-[ { "week": 1, "phase": "Base", "totalDistance": "e.g. 28 km", "summary": "short focus, max 8 words", "highlights": ["Long run: 8 km easy", "Intervals: 6x400m", "2 strength sessions"] } ]
-Show realistic progressive overload and a taper in the final 1-2 weeks. Exactly 3 highlights per week.`;
+[ { "week": 1, "phase": "Base", "totalDistance": "e.g. 28 km", "summary": "short focus, max 8 words", "days": [ { "d": "Mon", "s": "Rest" }, { "d": "Tue", "s": "6×400m @ 4:25/km" }, { "d": "Wed", "s": "Easy 5 km" }, { "d": "Thu", "s": "Tempo 3 km" }, { "d": "Fri", "s": "Rest" }, { "d": "Sat", "s": "Long run 8 km" }, { "d": "Sun", "s": "Strength + core" } ] } ]
+Include all 7 days (Mon to Sun) every week, each "s" max 6 words. Show realistic progressive overload and a taper in the final 1-2 weeks.`;
     try {
       const ai = await tryAI(prompt, "array");
       const arr = Array.isArray(ai) && ai.length ? ai : buildLocalWeeks(plan, f, displayUnit);
@@ -1586,9 +1636,18 @@ function Results({ plan, inputs, distance, units, paceUnit, setPaceUnit, weeks, 
                 </div>
                 {open && (
                   <div className="pf-wk-body">
-                    {(w.highlights || []).map((h, j) => (
-                      <div className="pf-hl" key={j}>{h}</div>
-                    ))}
+                    {w.days && w.days.length ? (
+                      w.days.map((d, j) => (
+                        <div className="pf-day" key={j}>
+                          <span className="dlab">{d.d}</span>
+                          <span className="dses">{d.s}</span>
+                        </div>
+                      ))
+                    ) : (
+                      (w.highlights || []).map((h, j) => (
+                        <div className="pf-hl" key={j}>{h}</div>
+                      ))
+                    )}
                   </div>
                 )}
               </div>
