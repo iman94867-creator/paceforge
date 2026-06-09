@@ -19,6 +19,7 @@ export default async function handler(req, res) {
 
     const session = await stripe.checkout.sessions.create({
       mode: "payment",
+      allow_promotion_codes: true, // shows a "Add promotion code" box at checkout
       line_items: [
         {
           quantity: 1,
